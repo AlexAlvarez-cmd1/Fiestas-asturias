@@ -8,7 +8,7 @@ import MapView, { Circle, Marker } from 'react-native-maps';
 
 // FIREBASE
 import { collection, getDocs } from 'firebase/firestore';
-import { db } from '../firebaseConfig';
+import { db } from '../../firebaseConfig';
 
 function calcularDistancia(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -227,7 +227,7 @@ const styles = StyleSheet.create({
   map: { flex: 1 },
   pantallaCarga: { flex: 1, backgroundColor: '#166534', justifyContent: 'center', alignItems: 'center' },
   textoCarga: { color: 'white', fontSize: 18, fontWeight: 'bold', marginTop: 20 },
-  panelControl: { paddingTop: 20, paddingHorizontal: 20, paddingBottom: 20  , backgroundColor: '#166534', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, zIndex: 10, elevation: 10 },
+  panelControl: { paddingTop: 70, paddingHorizontal: 20, paddingBottom: 20  , backgroundColor: '#166534', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, zIndex: 10, elevation: 10 },
   textoLabel: { color: 'white', fontWeight: 'bold', marginBottom: 5 },
   rowFechas: { flexDirection: 'row', marginTop: 15, gap: 10 },
   btnFecha: { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
