@@ -1,8 +1,5 @@
-import { useState } from 'react';
-import { Modal, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import ColorPicker, { HueSlider, Panel1, Preview } from 'reanimated-color-picker';
 import { useConfig } from '../../contexts/ConfigContext';
 
 export default function Configuracion() {
@@ -15,36 +12,14 @@ export default function Configuracion() {
 
   const isDark = theme === 'dark';
 
-  const [modalColorVisible, setModalColorVisible] = useState(false);
-  const [customColor, setCustomColor] = useState('#166534');
-
-  const colores = ['#166534', '#0284c7', '#dc2626', '#d97706', '#5c2c84'];
-  const emojis = ['⛺', '🎪', '🍻', '🌳', '🎉', '💃'];
-
-  const abrirModalColor = () => {
-    if (primaryColor && primaryColor.startsWith('#') && primaryColor.length === 7) {
-      setCustomColor(primaryColor);
-    } else {
-      setCustomColor('#166534');
-    }
-    setModalColorVisible(true);
-  };
-
-  const guardarColorPersonalizado = () => {
-    setPrimaryColor(customColor);
-    setModalColorVisible(false);
-  };
-
-  const getContrastColor = (hex) => {
-    if (!hex || hex.length !== 7) return '#ffffff';
-    const r = parseInt(hex.slice(1, 3), 16);
-    const g = parseInt(hex.slice(3, 5), 16);
-    const b = parseInt(hex.slice(5, 7), 16);
-    const luminance = (0.299 * r + 0.587 * g + 0.114 * b);
-    return luminance > 128 ? '#000000' : '#ffffff';
-  };
-
-  const textColor = getContrastColor(customColor);
+  // Paleta ampliada: Verdes, Azules, Rojos, Naranjas, Morados y Neutros
+  const colores = [
+    '#166534', '#059669', '#0284c7', '#2563eb', 
+    '#dc2626', '#e11d48', '#d97706', '#ea580c', 
+    '#5c2c84', '#7c3aed', '#db2777', '#475569'
+  ];
+  
+  const emojis = ['⛺', '🎪', '🍻', '🌳', '🎉', '💃', '🎶', '🍎'];
 
   return (
     <SafeAreaView style={[styles.container, isDark && styles.containerDark]}>
@@ -86,17 +61,6 @@ export default function Configuracion() {
                 onPress={() => setPrimaryColor(color)}
               />
             ))}
-            <TouchableOpacity
-              style={[
-                styles.colorCircle,
-                { backgroundColor: '#eee', justifyContent: 'center', alignItems: 'center' },
-                isDark && { backgroundColor: '#333' },
-                !colores.includes(primaryColor) && [styles.selectedCircle, isDark && styles.selectedCircleDark, { backgroundColor: primaryColor }]
-              ]}
-              onPress={abrirModalColor}
-            >
-              <Text style={{ fontSize: 20, color: isDark ? '#fff' : '#000' }}>+</Text>
-            </TouchableOpacity>
           </View>
         </View>
 
@@ -120,44 +84,6 @@ export default function Configuracion() {
         </View>
 
       </ScrollView>
-
-      <Modal
-        visible={modalColorVisible}
-        transparent={true}
-        animationType="slide"
-        onRequestClose={() => setModalColorVisible(false)}
-      >
-        <GestureHandlerRootView style={styles.modalFondo}>
-          <View style={[styles.modalContenido, isDark && styles.modalContenidoDark]}>
-            <Text style={[styles.modalTitulo, isDark && styles.textDark]}>Crea tu color</Text>
-            
-            <ColorPicker
-              style={{ width: '100%', gap: 20, marginBottom: 20 }}
-              value={customColor}
-              onChange={(color) => setCustomColor(color.hex)}
-            >
-              <Preview 
-                style={[styles.colorPreview, { alignSelf: 'center' }]} 
-                textStyle={{ fontSize: 16, fontWeight: 'bold' }} 
-              />
-              <Panel1 style={{ width: '100%', height: 200, borderRadius: 10 }} />
-              <HueSlider style={{ width: '100%', height: 30, borderRadius: 15 }} />
-            </ColorPicker>
-
-            <View style={styles.modalBotones}>
-              <TouchableOpacity style={styles.btnCancelar} onPress={() => setModalColorVisible(false)}>
-                <Text style={styles.textoBtnCancelar}>Cancelar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity 
-                style={[styles.btnGuardar, { backgroundColor: customColor }]} 
-                onPress={guardarColorPersonalizado}
-              >
-                <Text style={[styles.textoBtnGuardar, { color: textColor }]}>Aplicar</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </GestureHandlerRootView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -251,66 +177,5 @@ const styles = StyleSheet.create({
   },
   emojiText: {
     fontSize: 24,
-  },
-  modalFondo: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  modalContenido: {
-    backgroundColor: 'white',
-    padding: 25,
-    borderRadius: 20,
-    width: '85%',
-    alignItems: 'center',
-  },
-  modalContenidoDark: {
-    backgroundColor: '#1e1e1e',
-  },
-  modalTitulo: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    marginBottom: 15,
-    color: '#333',
-  },
-  colorPreview: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    marginBottom: 10,
-    borderWidth: 2,
-    borderColor: '#ddd',
-    overflow: 'hidden'
-  },
-  modalBotones: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    width: '100%',
-    marginTop: 10,
-  },
-  btnCancelar: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    backgroundColor: '#f1f5f9',
-    flex: 1,
-    marginRight: 10,
-    alignItems: 'center',
-  },
-  textoBtnCancelar: {
-    color: '#64748b',
-    fontWeight: 'bold',
-  },
-  btnGuardar: {
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 10,
-    flex: 1,
-    marginLeft: 10,
-    alignItems: 'center',
-  },
-  textoBtnGuardar: {
-    fontWeight: 'bold',
   },
 });
