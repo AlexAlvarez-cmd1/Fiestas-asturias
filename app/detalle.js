@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../firebaseConfig';
+import { useFavorite } from '../hooks/useFavorite';
 
 export default function PantallaDetalle() {
   const router = useRouter();
@@ -13,6 +14,9 @@ export default function PantallaDetalle() {
   
   const [modalVisible, setModalVisible] = useState(false);
   const [cargandoEliminar, setCargandoEliminar] = useState(false);
+  
+  // Hook para favoritos
+  const { isFavorite, toggleFavorite, loading: loadingFavorite } = useFavorite(id);
   // --- CONFIGURACIÓN DE TRANSPORTE URBANO DINÁMICO ---
   const transporteUrbano = {
     "Oviedo": { nombre: "TUA Oviedo", color: "#d97706", url: "https://www.tua.es" },
@@ -60,8 +64,28 @@ export default function PantallaDetalle() {
 
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: '#f4f4f4' }}>
+      <Stack.Screen 
+        options={{ 
+          title: nombre || "Detalles",
+          headerLeft: () => (
+            <TouchableOpacity onPress={() => router.back()} style={{ paddingLeft: 10 }}>
+              <Text style={{ fontSize: 24 }}>← Atrás</Text>
+            </TouchableOpacity>
+          ),
+          headerRight: () => (
+            <TouchableOpacity 
+              onPress={toggleFavorite} 
+              style={{ paddingRight: 15 }}
+              disabled={loadingFavorite}
+            >
+              <Text style={{ fontSize: 28 }}>
+                {loadingFavorite ? '...' : isFavorite ? '❤️' : '🤍'}
+              </Text>
+            </TouchableOpacity>
+          )
+        }} 
+      />
       <ScrollView style={styles.container}>
-        <Stack.Screen options={{ title: nombre || "Detalles" }} />
         
         <View style={styles.infoCard}>
           {imagen && (
@@ -139,10 +163,22 @@ export default function PantallaDetalle() {
 
       <Modal visible={modalVisible} transparent={true} animationType="fade" onRequestClose={() => setModalVisible(false)}>
         <View style={styles.modalFondo}>
-          <TouchableOpacity style={styles.botonCerrarModal} onPress={() => setModalVisible(false)}>
-            <Text style={styles.textoCerrar}>❌ Cerrar</Text>
+          <TouchableOpacity 
+            style={styles.botonCerrarModal} 
+            onPress={() => setModalVisible(false)}
+            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
+          >
+            <Text style={styles.textoCerrar}>❌</Text>
+            <Text style={styles.textoBotonCerrar}>Cerrar</Text>
           </TouchableOpacity>
-          <Image source={{ uri: imagen }} style={styles.cartelGigante} resizeMode="contain" />
+          
+          <TouchableOpacity 
+            style={styles.areaZoomAtrás} 
+            onPress={() => setModalVisible(false)}
+            activeOpacity={1}
+          >
+            <Image source={{ uri: imagen }} style={styles.cartelGigante} resizeMode="contain" />
+          </TouchableOpacity>
         </View>
       </Modal>
     </SafeAreaView>
@@ -173,7 +209,9 @@ const styles = StyleSheet.create({
   botonEliminar: { marginTop: 30, alignItems: 'center', padding: 10 },
   btnTextEliminar: { color: '#94a3b8', fontSize: 13, textDecorationLine: 'underline' },
   modalFondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
+  areaZoomAtrás: { flex: 1, justifyContent: 'center', alignItems: 'center', width: '100%' },
   cartelGigante: { width: '100%', height: '85%' },
-  botonCerrarModal: { position: 'absolute', top: 50, right: 20, backgroundColor: 'rgba(255,255,255,0.2)', padding: 12, borderRadius: 15 },
-  textoCerrar: { color: 'white', fontWeight: 'bold' }
+  botonCerrarModal: { position: 'absolute', top: 40, right: 20, backgroundColor: 'rgba(239, 68, 68, 0.9)', padding: 15, borderRadius: 50, zIndex: 100, minWidth: 60, height: 60, justifyContent: 'center', alignItems: 'center', elevation: 10 },
+  textoCerrar: { color: 'white', fontWeight: 'bold', fontSize: 24, textAlign: 'center' },
+  textoBotonCerrar: { color: 'white', fontWeight: 'bold', fontSize: 10, marginTop: 2, textAlign: 'center' }
 });
