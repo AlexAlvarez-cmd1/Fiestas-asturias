@@ -3,7 +3,7 @@ import Slider from '@react-native-community/slider';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Alert, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View, Modal } from 'react-native';
 import MapView, { Circle, Marker } from 'react-native-maps';
 
 // FIREBASE
@@ -34,6 +34,9 @@ export default function PantallaMapa() {
   const [fechaInicio, setFechaInicio] = useState(null);
   const [fechaFin, setFechaFin] = useState(null);
   const [modoPicker, setModoPicker] = useState(null);
+  const [busqueda, setBusqueda] = useState('');
+  const [orquestaFiltro, setOrquestaFiltro] = useState('');
+  const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
 
   useFocusEffect(
     useCallback(() => {
@@ -86,11 +89,25 @@ export default function PantallaMapa() {
   const fiestasFiltradas = listaDeFiestas.filter((fiesta) => {
     if (!fiesta.ubicacion || !fiesta.fecha) return false;
 
-    // 1. Filtro de distancia
+    // 1. Filtro de búsqueda por nombre
+    if (busqueda.trim() !== '') {
+      const nombre = fiesta.nombre.toLowerCase();
+      const busquedaLower = busqueda.toLowerCase();
+      if (!nombre.includes(busquedaLower)) return false;
+    }
+
+    // 2. Filtro por orquesta
+    if (orquestaFiltro !== '') {
+      if (!fiesta.orquesta || fiesta.orquesta.toLowerCase() !== orquestaFiltro.toLowerCase()) {
+        return false;
+      }
+    }
+
+    // 3. Filtro de distancia
     const dist = calcularDistancia(centroFiltro.lat, centroFiltro.lon, fiesta.ubicacion.latitude, fiesta.ubicacion.longitude);
     if (dist > radioKm) return false;
-    
-    // 2. Filtro de fechas (Normalizamos a medianoche para que sea inclusivo)
+
+    // 4. Filtro de fechas (Normalizamos a medianoche para que sea inclusivo)
     const fFiesta = new Date(fiesta.fecha);
     fFiesta.setHours(0,0,0,0);
 
@@ -123,17 +140,27 @@ export default function PantallaMapa() {
   return (
     <View style={styles.container}>
       <View style={styles.panelControl}>
-        <Text style={styles.textoLabel}>Radio de búsqueda: {Math.round(radioKm)} km</Text>
+        <View style={styles.headerPanel}>
+          <Text style={styles.textoLabel}>Radio: {Math.round(radioKm)} km</Text>
+          <TouchableOpacity
+            style={styles.btnLupa}
+            onPress={() => setModalFiltrosVisible(true)}
+          >
+            <Text style={styles.textoLupa}>🔍</Text>
+          </TouchableOpacity>
+        </View>
+
         <Slider
           style={{width: '100%', height: 30}} minimumValue={5} maximumValue={100} value={radioKm}
           onValueChange={setRadioKm} minimumTrackTintColor="#F59E0B" thumbTintColor="#F59E0B"
         />
+
         <View style={styles.rowFechas}>
-          <TouchableOpacity style={[styles.btnFecha, modoPicker === 'inicio' && styles.btnActivo]} onPress={() => setModoPicker('inicio')}>
+          <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'inicio' && styles.btnActivo]} onPress={() => setModoPicker('inicio')}>
             <Text style={styles.lblFecha}>DESDE</Text>
             <Text style={styles.valFecha}>{fechaInicio ? fechaInicio.toLocaleDateString() : 'Hoy'}</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={[styles.btnFecha, modoPicker === 'fin' && styles.btnActivo]} onPress={() => setModoPicker('fin')}>
+          <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'fin' && styles.btnActivo]} onPress={() => setModoPicker('fin')}>
             <Text style={styles.lblFecha}>HASTA</Text>
             <Text style={styles.valFecha}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
           </TouchableOpacity>
@@ -155,6 +182,55 @@ export default function PantallaMapa() {
           />
         </View>
       )}
+
+      {/* MODAL DE FILTROS CON LUPA */}
+      <Modal
+        visible={modalFiltrosVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setModalFiltrosVisible(false)}
+      >
+        <View style={styles.modalFiltrosFondo}>
+          <View style={styles.modalFiltrosContenido}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitulo}>🔍 Filtros</Text>
+              <TouchableOpacity onPress={() => setModalFiltrosVisible(false)}>
+                <Text style={styles.btnCerrarModal}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.inputModal}
+              placeholder="Buscar por nombre de fiesta..."
+              value={busqueda}
+              onChangeText={setBusqueda}
+              placeholderTextColor="#999"
+            />
+
+            <TextInput
+              style={styles.inputModal}
+              placeholder="Filtrar por orquesta/banda..."
+              value={orquestaFiltro}
+              onChangeText={setOrquestaFiltro}
+              placeholderTextColor="#999"
+            />
+
+            <TouchableOpacity
+              style={styles.btnLimpiarModal}
+              onPress={() => { setBusqueda(''); setOrquestaFiltro(''); }}
+            >
+              <Text style={styles.textoLimpiarModal}>🔄 Limpiar filtros</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.btnCerrarFiltros}
+              onPress={() => setModalFiltrosVisible(false)}
+            >
+              <Text style={styles.textoCerrarFiltros}>Cerrar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* BOTÓN BUSCAR EN ESTA ZONA (Al fondo) */}
       {mostrarBotonZona && (
@@ -231,16 +307,33 @@ const styles = StyleSheet.create({
   textoLabel: { color: 'white', fontWeight: 'bold', marginBottom: 5 },
   rowFechas: { flexDirection: 'row', marginTop: 15, gap: 10 },
   btnFecha: { flex: 1, backgroundColor: 'rgba(255,255,255,0.1)', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  btnFechaFlexible: { flex: 1 },
   btnActivo: { borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.2)' },
   lblFecha: { color: '#F59E0B', fontSize: 10, fontWeight: 'bold' },
   valFecha: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  
+  btnLimpiar: { backgroundColor: 'rgba(255,255,255,0.1)', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
+  lblLimpiar: { color: '#F59E0B', fontSize: 10, fontWeight: 'bold' },
   btnBuscarZona: { position: 'absolute', bottom: 30, alignSelf: 'center', backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 30, elevation: 6, zIndex: 20, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: {width:0, height:2} },
   textoBusqueda: { color: '#166534', fontWeight: 'bold', fontSize: 16 },
 
   puntoGps: { width: 20, height: 20, backgroundColor: '#3b82f6', borderRadius: 10, borderWidth: 3, borderColor: 'white', elevation: 5 },
   marcador: { backgroundColor: 'white', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#166534' },
   modalCalendario: { position: 'absolute', top: 150, left: 20, right: 20, backgroundColor: 'white', borderRadius: 20, padding: 10, zIndex: 100, elevation: 20 },
-  
+
+  headerPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  btnLupa: { backgroundColor: 'rgba(255,255,255,0.2)', width: 45, height: 45, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  textoLupa: { fontSize: 24 },
+
+  modalFiltrosFondo: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
+  modalFiltrosContenido: { backgroundColor: 'white', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, maxHeight: '80%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  modalTitulo: { fontSize: 20, fontWeight: 'bold', color: '#166534' },
+  btnCerrarModal: { fontSize: 28, color: '#999', fontWeight: 'bold' },
+  inputModal: { backgroundColor: '#f0f0f0', paddingHorizontal: 15, paddingVertical: 12, borderRadius: 10, marginBottom: 12, fontSize: 16, borderWidth: 1, borderColor: '#ddd', color: '#333' },
+  btnLimpiarModal: { backgroundColor: '#FFE5CC', padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 15, marginBottom: 10 },
+  textoLimpiarModal: { color: '#c2410c', fontWeight: 'bold', fontSize: 14 },
+  btnCerrarFiltros: { backgroundColor: '#166534', padding: 15, borderRadius: 10, alignItems: 'center' },
+  textoCerrarFiltros: { color: 'white', fontWeight: 'bold', fontSize: 16 },
+
   btnFlotanteCirculo: { position: 'absolute', right: 20, width: 56, height: 56, borderRadius: 28, justifyContent: 'center', alignItems: 'center', elevation: 5, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 3, shadowOffset: {width:0, height:2} }
 });
