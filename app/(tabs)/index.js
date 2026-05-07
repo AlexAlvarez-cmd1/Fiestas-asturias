@@ -1,6 +1,7 @@
 import { useRouter } from 'expo-router';
 import { ImageBackground, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useConfig } from '../../contexts/ConfigContext';
 
 // URL de imagen de ejemplo (un prao festivo nocturno)
 // Puedes cambiar esta URL por una foto de Asturias o una local
@@ -8,6 +9,7 @@ const fondoImagen = { uri: 'https://upload.wikimedia.org/wikipedia/commons/thumb
 
 export default function PantallaHome() {
   const router = useRouter();
+  const { emojiFiesta, primaryColor } = useConfig();
 
   return (
     <View style={styles.container}>
@@ -26,7 +28,7 @@ export default function PantallaHome() {
             
             {/* Cabecera con Logo y Título */}
             <View style={styles.header}>
-              <Text style={styles.logoEmoji}>⛺</Text>
+              <Text style={styles.logoEmoji}>{emojiFiesta}</Text>
               <Text style={styles.titulo}>Fiestas de prao</Text>
             </View>
 
@@ -37,7 +39,7 @@ export default function PantallaHome() {
 
             {/* Botón clásico - Mantenemos el estilo anterior */}
             <TouchableOpacity 
-              style={styles.boton} 
+              style={[styles.boton, { backgroundColor: primaryColor }]} 
               onPress={() => router.push('/mapa')}
             >
               <Text style={styles.textoBoton}>IR AL MAPA</Text>

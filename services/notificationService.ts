@@ -1,5 +1,6 @@
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 
 // Configurar el handler de notificaciones
 Notifications.setNotificationHandler({
@@ -38,8 +39,16 @@ export const notificationService = {
    */
   async getExpoPushToken() {
     try {
+      const projectId =
+        Constants?.expoConfig?.extra?.eas?.projectId ?? Constants?.easConfig?.projectId;
+
+      if (!projectId) {
+        console.warn('No se encontró el projectId de EAS. Para usar notificaciones remotas de Expo, configura EAS.');
+        return null;
+      }
+
       const token = await Notifications.getExpoPushTokenAsync({
-        projectId: 'fiestas-asturias',
+        projectId,
       });
       return token.data;
     } catch (error) {

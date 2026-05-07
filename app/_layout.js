@@ -1,5 +1,7 @@
 import { Stack, useRouter } from 'expo-router';
 import { useEffect, useRef } from 'react';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { ConfigProvider } from '../contexts/ConfigContext';
 import { fiestasMonitorService } from '../services/fiestasMonitorService';
 import { notificationService } from '../services/notificationService';
 
@@ -83,14 +85,18 @@ export default function RootLayout() {
   }, [router]);
 
   return (
-    <Stack>
-      {/* Carga el grupo de pestañas por defecto */}
-      <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-      
-      {/* Pantallas que se abren encima (sin pestañas abajo) */}
-      <Stack.Screen name="detalle" options={{ title: 'Detalles' }} />
-      <Stack.Screen name="nueva" options={{ title: 'Añadir Fiesta' }} />
-      <Stack.Screen name="editar" options={{ title: 'Editar Fiesta' }} />
-    </Stack>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ConfigProvider>
+        <Stack>
+          {/* Carga el grupo de pestañas por defecto */}
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          
+          {/* Pantallas que se abren encima (sin pestañas abajo) */}
+          <Stack.Screen name="detalle" options={{ title: 'Detalles' }} />
+          <Stack.Screen name="nueva" options={{ title: 'Añadir Fiesta' }} />
+          <Stack.Screen name="editar" options={{ title: 'Editar Fiesta' }} />
+        </Stack>
+      </ConfigProvider>
+    </GestureHandlerRootView>
   );
 }

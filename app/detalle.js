@@ -1,10 +1,11 @@
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { deleteDoc, doc } from 'firebase/firestore';
-import { useState } from 'react';
+import { deleteDoc, doc, increment, onSnapshot, updateDoc } from 'firebase/firestore';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Linking, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../firebaseConfig';
 import { useFavorite } from '../hooks/useFavorite';
+import { storageService } from '../services/storageService';
 
 export default function PantallaDetalle() {
   const router = useRouter();
@@ -15,8 +16,69 @@ export default function PantallaDetalle() {
   const [modalVisible, setModalVisible] = useState(false);
   const [cargandoEliminar, setCargandoEliminar] = useState(false);
   
+  // Asistencia
+  const [asistentesCount, setAsistentesCount] = useState(0);
+  const [hasAttended, setHasAttended] = useState(false);
+  const [loadingAttendance, setLoadingAttendance] = useState(true);
+  
   // Hook para favoritos
   const { isFavorite, toggleFavorite, loading: loadingFavorite } = useFavorite(id);
+
+  useEffect(() => {
+    if (!id) return;
+    let unsubscribe = () => {};
+
+    const loadAttendance = async () => {
+      // Check local storage
+      const attendedStatus = await storageService.getItem(`attended_${id}`);
+      setHasAttended(attendedStatus === 'true');
+
+      // Listen to Firebase for real-time counter updates
+      const fiestaRef = doc(db, 'fiestas', id);
+      unsubscribe = onSnapshot(fiestaRef, (docSnap) => {
+        if (docSnap.exists()) {
+          const data = docSnap.data();
+          setAsistentesCount(data.asistentes || 0);
+        }
+        setLoadingAttendance(false);
+      });
+    };
+
+    loadAttendance();
+
+    return () => unsubscribe();
+  }, [id]);
+
+  const toggleAttendance = async () => {
+    if (loadingAttendance) return;
+    
+    // Optimistic UI update
+    const newStatus = !hasAttended;
+    setHasAttended(newStatus);
+    setAsistentesCount(prev => newStatus ? prev + 1 : Math.max(0, prev - 1));
+
+    try {
+      const fiestaRef = doc(db, 'fiestas', id);
+      if (newStatus) {
+        await storageService.setItem(`attended_${id}`, 'true');
+        await updateDoc(fiestaRef, {
+          asistentes: increment(1)
+        });
+      } else {
+        await storageService.removeItem(`attended_${id}`);
+        await updateDoc(fiestaRef, {
+          asistentes: increment(-1)
+        });
+      }
+    } catch (error) {
+      console.error("Error updating attendance:", error);
+      Alert.alert("Error", "No se pudo actualizar tu asistencia.");
+      // Revert optimistic update
+      setHasAttended(!newStatus);
+      setAsistentesCount(prev => !newStatus ? prev + 1 : Math.max(0, prev - 1));
+    }
+  };
+
   // --- CONFIGURACIÓN DE TRANSPORTE URBANO DINÁMICO ---
   const transporteUrbano = {
     "Oviedo": { nombre: "TUA Oviedo", color: "#d97706", url: "https://www.tua.es" },
@@ -78,8 +140,8 @@ export default function PantallaDetalle() {
               style={{ paddingRight: 15 }}
               disabled={loadingFavorite}
             >
-              <Text style={{ fontSize: 28 }}>
-                {loadingFavorite ? '...' : isFavorite ? '❤️' : '🤍'}
+              <Text style={{ fontSize: 28, backgroundColor: '#fffffff1' }}>
+                {loadingFavorite ? '...' : isFavorite ? '❤️' : '♡'}
               </Text>
             </TouchableOpacity>
           )
@@ -108,6 +170,25 @@ export default function PantallaDetalle() {
 
             <Text style={styles.label}>🎵 Música</Text>
             <Text style={styles.value}>{orquesta || 'Por confirmar'}</Text>
+
+            {/* BOTÓN ASISTENCIA */}
+            <View style={styles.asistenciaContainer}>
+              <TouchableOpacity 
+                style={[styles.btnAsistir, hasAttended && styles.btnAsistirActivo]} 
+                onPress={toggleAttendance}
+                disabled={loadingAttendance}
+              >
+                <Text style={[styles.textoBtnAsistir, hasAttended && styles.textoBtnAsistirActivo]}>
+                  {hasAttended ? '👋 ¡Voy a ir!' : '🤚 Asistiré'}
+                </Text>
+              </TouchableOpacity>
+              <View style={styles.contadorContainer}>
+                <Text style={styles.emojiContador}>👥</Text>
+                <Text style={styles.textoContador}>
+                  {asistentesCount} {asistentesCount === 1 ? 'persona asistirá' : 'personas asistirán'}
+                </Text>
+              </View>
+            </View>
 
             <Text style={styles.labelRuta}>¿CÓMO LLEGAMOS A LA FOLIXA?</Text>
             
@@ -196,6 +277,14 @@ const styles = StyleSheet.create({
   label: { fontSize: 12, color: '#94a3b8', fontWeight: 'bold', marginTop: 15, textTransform: 'uppercase' },
   value: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginTop: 2 },
   labelRuta: { fontSize: 14, fontWeight: '900', marginTop: 30, textAlign: 'center', color: '#166534', letterSpacing: 1 },
+  asistenciaContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 25, backgroundColor: '#f8fafc', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#e2e8f0' },
+  btnAsistir: { backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: '#3b82f6', elevation: 2, shadowColor: '#3b82f6', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: {width:0, height:2} },
+  btnAsistirActivo: { backgroundColor: '#3b82f6' },
+  textoBtnAsistir: { color: '#3b82f6', fontWeight: 'bold', fontSize: 16 },
+  textoBtnAsistirActivo: { color: 'white' },
+  contadorContainer: { marginLeft: 15, flexDirection: 'row', alignItems: 'center', flex: 1 },
+  emojiContador: { fontSize: 20, marginRight: 5 },
+  textoContador: { color: '#475569', fontSize: 14, fontWeight: 'bold', flexShrink: 1 },
   gridTransporte: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', marginTop: 15, gap: 10 },
   btnOpcion: { width: '48%', padding: 15, borderRadius: 15, alignItems: 'center', marginBottom: 10, elevation: 3 },
   btnCoche: { backgroundColor: '#166534' },

@@ -26,7 +26,14 @@ export const fiestasMonitorService = {
       console.log('🔔 Verificando fiestas favoritas...');
 
       // Obtener favoritos y fiestas de Firestore
-      const favorites = await favoritesService.getFavorites();
+      let favorites: string[] = [];
+      try {
+        favorites = await favoritesService.getFavorites();
+      } catch (error) {
+        console.warn('⚠️ No se pudieron obtener favoritos:', error);
+        return; // Si no podemos obtener favoritos, salir silenciosamente
+      }
+
       if (favorites.length === 0) {
         console.log('No hay favoritos guardados');
         return;
@@ -36,55 +43,78 @@ export const fiestasMonitorService = {
       const favoritesFiestas = allFiestas.filter(f => favorites.includes(f.id));
 
       for (const fiesta of favoritesFiestas) {
-        const diasRestantes = geoService.getDaysUntilFiesta(fiesta.fecha);
-        const alreadyNotified = await favoritesService.isAlreadyNotifiedFavorite(fiesta.id);
+        try {
+          const diasRestantes = geoService.getDaysUntilFiesta(fiesta.fecha);
+          let alreadyNotified = false;
+          
+          try {
+            alreadyNotified = await favoritesService.isAlreadyNotifiedFavorite(fiesta.id);
+          } catch (error) {
+            console.warn(`⚠️ Error verificando notificación previa: ${fiesta.id}`);
+          }
 
-        // Notificar 7 días antes
-        if (diasRestantes === 7 && !alreadyNotified) {
-          await notificationService.sendLocalNotification(
-            '⭐ ¡Tu fiesta favorita se acerca!',
-            `${fiesta.nombre} es en una semana (${geoService.formatDate(fiesta.fecha)})`,
-            { 
-              fiestaId: fiesta.id,
-              type: 'favorite_7days',
-              nombre: fiesta.nombre,
-              fecha: fiesta.fecha,
+          // Notificar 7 días antes
+          if (diasRestantes === 7 && !alreadyNotified) {
+            await notificationService.sendLocalNotification(
+              '⭐ ¡Tu fiesta favorita se acerca!',
+              `${fiesta.nombre} es en una semana (${geoService.formatDate(fiesta.fecha)})`,
+              { 
+                fiestaId: fiesta.id,
+                type: 'favorite_7days',
+                nombre: fiesta.nombre,
+                fecha: fiesta.fecha,
+              }
+            );
+            try {
+              await favoritesService.markFavoriteNotified(fiesta.id);
+            } catch (error) {
+              console.warn(`⚠️ Error marcando como notificada: ${fiesta.id}`);
             }
-          );
-          await favoritesService.markFavoriteNotified(fiesta.id);
-          console.log(`✅ Notificación enviada: ${fiesta.nombre} (7 días)`);
-        }
+            console.log(`✅ Notificación enviada: ${fiesta.nombre} (7 días)`);
+          }
 
-        // Notificar 3 días antes
-        if (diasRestantes === 3 && !alreadyNotified) {
-          await notificationService.sendLocalNotification(
-            '⭐ ¡Tu favorita es en 3 días!',
-            `${fiesta.nombre} - ${geoService.formatDate(fiesta.fecha)}`,
-            {
-              fiestaId: fiesta.id,
-              type: 'favorite_3days',
-              nombre: fiesta.nombre,
-              fecha: fiesta.fecha,
+          // Notificar 3 días antes
+          if (diasRestantes === 3 && !alreadyNotified) {
+            await notificationService.sendLocalNotification(
+              '⭐ ¡Tu favorita es en 3 días!',
+              `${fiesta.nombre} - ${geoService.formatDate(fiesta.fecha)}`,
+              {
+                fiestaId: fiesta.id,
+                type: 'favorite_3days',
+                nombre: fiesta.nombre,
+                fecha: fiesta.fecha,
+              }
+            );
+            try {
+              await favoritesService.markFavoriteNotified(fiesta.id);
+            } catch (error) {
+              console.warn(`⚠️ Error marcando como notificada: ${fiesta.id}`);
             }
-          );
-          await favoritesService.markFavoriteNotified(fiesta.id);
-          console.log(`✅ Notificación enviada: ${fiesta.nombre} (3 días)`);
-        }
+            console.log(`✅ Notificación enviada: ${fiesta.nombre} (3 días)`);
+          }
 
-        // Notificar 1 día antes
-        if (diasRestantes === 1 && !alreadyNotified) {
-          await notificationService.sendLocalNotification(
-            '⭐ ¡Mañana es tu fiesta favorita!',
-            `${fiesta.nombre} - No te la pierdas 🎉`,
-            {
-              fiestaId: fiesta.id,
-              type: 'favorite_tomorrow',
-              nombre: fiesta.nombre,
-              fecha: fiesta.fecha,
+          // Notificar 1 día antes
+          if (diasRestantes === 1 && !alreadyNotified) {
+            await notificationService.sendLocalNotification(
+              '⭐ ¡Mañana es tu fiesta favorita!',
+              `${fiesta.nombre} - No te la pierdas 🎉`,
+              {
+                fiestaId: fiesta.id,
+                type: 'favorite_tomorrow',
+                nombre: fiesta.nombre,
+                fecha: fiesta.fecha,
+              }
+            );
+            try {
+              await favoritesService.markFavoriteNotified(fiesta.id);
+            } catch (error) {
+              console.warn(`⚠️ Error marcando como notificada: ${fiesta.id}`);
             }
-          );
-          await favoritesService.markFavoriteNotified(fiesta.id);
-          console.log(`✅ Notificación enviada: ${fiesta.nombre} (mañana)`);
+            console.log(`✅ Notificación enviada: ${fiesta.nombre} (mañana)`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Error procesando fiesta favorita ${fiesta.id}:`, error);
+          // Continuar con la siguiente fiesta
         }
       }
     } catch (error) {
@@ -117,30 +147,45 @@ export const fiestasMonitorService = {
       });
 
       for (const fiesta of nearbyFiestas) {
-        const alreadyNotified = await favoritesService.isAlreadyNotifiedNearby(fiesta.id);
+        try {
+          let alreadyNotified = false;
+          
+          try {
+            alreadyNotified = await favoritesService.isAlreadyNotifiedNearby(fiesta.id);
+          } catch (error) {
+            console.warn(`⚠️ Error verificando notificación previa: ${fiesta.id}`);
+          }
 
-        if (!alreadyNotified) {
-          const distance = geoService.calculateDistance(
-            userLocation.latitude,
-            userLocation.longitude,
-            fiesta.ubicacion.latitude,
-            fiesta.ubicacion.longitude
-          );
+          if (!alreadyNotified) {
+            const distance = geoService.calculateDistance(
+              userLocation.latitude,
+              userLocation.longitude,
+              fiesta.ubicacion.latitude,
+              fiesta.ubicacion.longitude
+            );
 
-          await notificationService.sendLocalNotification(
-            `🎉 ¡Hay una fiesta cerca! (${Math.round(distance)} km)`,
-            `${fiesta.nombre} en ${fiesta.concejo} - ${geoService.formatDate(fiesta.fecha)}`,
-            {
-              fiestaId: fiesta.id,
-              type: 'nearby_fiesta',
-              nombre: fiesta.nombre,
-              fecha: fiesta.fecha,
-              distancia: Math.round(distance),
-              concejo: fiesta.concejo,
+            await notificationService.sendLocalNotification(
+              `🎉 ¡Hay una fiesta cerca! (${Math.round(distance)} km)`,
+              `${fiesta.nombre} en ${fiesta.concejo} - ${geoService.formatDate(fiesta.fecha)}`,
+              {
+                fiestaId: fiesta.id,
+                type: 'nearby_fiesta',
+                nombre: fiesta.nombre,
+                fecha: fiesta.fecha,
+                distancia: Math.round(distance),
+                concejo: fiesta.concejo,
+              }
+            );
+            try {
+              await favoritesService.markNearbyNotified(fiesta.id);
+            } catch (error) {
+              console.warn(`⚠️ Error marcando cercana como notificada: ${fiesta.id}`);
             }
-          );
-          await favoritesService.markNearbyNotified(fiesta.id);
-          console.log(`✅ Notificación cercana enviada: ${fiesta.nombre} (${Math.round(distance)} km)`);
+            console.log(`✅ Notificación cercana enviada: ${fiesta.nombre} (${Math.round(distance)} km)`);
+          }
+        } catch (error) {
+          console.warn(`⚠️ Error procesando fiesta cercana ${fiesta.id}:`, error);
+          // Continuar con la siguiente fiesta
         }
       }
 

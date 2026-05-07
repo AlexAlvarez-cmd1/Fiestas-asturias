@@ -5,10 +5,12 @@ import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Circle, Marker } from 'react-native-maps';
+import { useConfig } from '../../contexts/ConfigContext';
 
 // FIREBASE
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
+import { favoritesService } from '../../services/favoritesService';
 
 function calcularDistancia(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -21,6 +23,7 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
 export default function PantallaMapa() {
   const router = useRouter();
   const mapRef = useRef(null);
+  const { emojiFiesta, primaryColor } = useConfig();
   
   const [listaDeFiestas, setListaDeFiestas] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -37,6 +40,8 @@ export default function PantallaMapa() {
   const [busqueda, setBusqueda] = useState('');
   const [orquestaFiltro, setOrquestaFiltro] = useState('');
   const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
+  const [soloFavoritos, setSoloFavoritos] = useState(false);
+  const [favoritosIds, setFavoritosIds] = useState([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -61,6 +66,14 @@ export default function PantallaMapa() {
         } catch (error) {
           Alert.alert("Error", "No se pudo conectar con Firebase.");
         }
+
+        try {
+          const favs = await favoritesService.getFavorites();
+          setFavoritosIds(favs || []);
+        } catch (error) {
+          console.warn("Error favs:", error);
+        }
+
         setCargando(false);
       };
       inicializarApp();
@@ -103,6 +116,13 @@ export default function PantallaMapa() {
       }
     }
 
+    // Filtro Favoritos
+    if (soloFavoritos) {
+      if (!favoritosIds.includes(fiesta.id)) {
+        return false;
+      }
+    }
+
     // 3. Filtro de distancia
     const dist = calcularDistancia(centroFiltro.lat, centroFiltro.lon, fiesta.ubicacion.latitude, fiesta.ubicacion.longitude);
     if (dist > radioKm) return false;
@@ -130,7 +150,7 @@ export default function PantallaMapa() {
 
   if (cargando) {
     return (
-      <View style={styles.pantallaCarga}>
+      <View style={[styles.pantallaCarga, { backgroundColor: primaryColor }]}>
         <ActivityIndicator size="large" color="#F59E0B" />
         <Text style={styles.textoCarga}>Localizando folixas...</Text>
       </View>
@@ -139,15 +159,23 @@ export default function PantallaMapa() {
 
   return (
     <View style={styles.container}>
-      <View style={styles.panelControl}>
+      <View style={[styles.panelControl, { backgroundColor: primaryColor }]}>
         <View style={styles.headerPanel}>
           <Text style={styles.textoLabel}>Radio: {Math.round(radioKm)} km</Text>
-          <TouchableOpacity
-            style={styles.btnLupa}
-            onPress={() => setModalFiltrosVisible(true)}
-          >
-            <Text style={styles.textoLupa}>🔍</Text>
-          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10 }}>
+            <TouchableOpacity
+              style={[styles.btnLupa, soloFavoritos && styles.btnActivoFondo]}
+              onPress={() => setSoloFavoritos(!soloFavoritos)}
+            >
+              <Text style={styles.textoLupa}>⭐</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.btnLupa}
+              onPress={() => setModalFiltrosVisible(true)}
+            >
+              <Text style={styles.textoLupa}>🔍</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <Slider
@@ -164,6 +192,11 @@ export default function PantallaMapa() {
             <Text style={styles.lblFecha}>HASTA</Text>
             <Text style={styles.valFecha}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
           </TouchableOpacity>
+          {(fechaInicio || fechaFin) && (
+            <TouchableOpacity style={styles.btnLimpiar} onPress={() => { setFechaInicio(null); setFechaFin(null); setModoPicker(null); }}>
+              <Text style={styles.lblLimpiar}>✕</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -258,7 +291,7 @@ export default function PantallaMapa() {
 
         {/* Punto de búsqueda central */}
         <Marker coordinate={{ latitude: centroFiltro.lat, longitude: centroFiltro.lon }} title="Buscando desde aquí">
-          <Text style={{fontSize: 28}}>📍</Text>
+          
         </Marker>
 
         {/* Tu punto azul */}
@@ -282,18 +315,21 @@ export default function PantallaMapa() {
               });
             }}
           >
-            <View style={styles.marcador} pointerEvents="none"><Text style={{ fontSize: 22 }}>⛺</Text></View>
+            <View style={[styles.marcador, { borderColor: primaryColor }]} pointerEvents="none">
+              <Text style={{ fontSize: 22 }}>{emojiFiesta}</Text>
+            </View>
           </Marker>
         ))}
       </MapView>
 
       {/* BOTONES FLOTANTES LATERALES */}
-      <TouchableOpacity style={[styles.btnFlotanteCirculo, { bottom: 95, backgroundColor: '#166534' }]} onPress={() => router.push('/nueva')}>
+      <TouchableOpacity style={[styles.btnFlotanteCirculo, { bottom: 95, backgroundColor: primaryColor }]} onPress={() => router.push('/nueva')}>
         <Text style={{fontSize: 30, color: 'white'}}>+</Text>
       </TouchableOpacity>
       
       <TouchableOpacity style={[styles.btnFlotanteCirculo, { bottom: 30, backgroundColor: 'white' }]} onPress={recentrarMapa}>
-        <Text style={{fontSize: 24}}>📍</Text>
+        <Text style={{fontSize: 24, color: primaryColor}}>📍</Text>
+  
       </TouchableOpacity>
     </View>
   );
@@ -311,8 +347,8 @@ const styles = StyleSheet.create({
   btnActivo: { borderColor: '#F59E0B', backgroundColor: 'rgba(245,158,11,0.2)' },
   lblFecha: { color: '#F59E0B', fontSize: 10, fontWeight: 'bold' },
   valFecha: { color: 'white', fontSize: 14, fontWeight: 'bold' },
-  btnLimpiar: { backgroundColor: 'rgba(255,255,255,0.1)', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)', justifyContent: 'center', alignItems: 'center' },
-  lblLimpiar: { color: '#F59E0B', fontSize: 10, fontWeight: 'bold' },
+  btnLimpiar: { backgroundColor: '#ef4444', paddingHorizontal: 16, paddingVertical: 12, borderRadius: 12, justifyContent: 'center', alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 2, shadowOffset: {width:0, height:1} },
+  lblLimpiar: { color: 'white', fontSize: 16, fontWeight: 'bold' },
   btnBuscarZona: { position: 'absolute', bottom: 30, alignSelf: 'center', backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 30, elevation: 6, zIndex: 20, shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 4, shadowOffset: {width:0, height:2} },
   textoBusqueda: { color: '#166534', fontWeight: 'bold', fontSize: 16 },
 
@@ -322,6 +358,7 @@ const styles = StyleSheet.create({
 
   headerPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
   btnLupa: { backgroundColor: 'rgba(255,255,255,0.2)', width: 45, height: 45, borderRadius: 22, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  btnActivoFondo: { backgroundColor: 'rgba(245,158,11,0.4)', borderColor: '#F59E0B' },
   textoLupa: { fontSize: 24 },
 
   modalFiltrosFondo: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
