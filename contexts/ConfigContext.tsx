@@ -5,6 +5,14 @@ const ConfigContext = createContext();
 
 export const useConfig = () => useContext(ConfigContext);
 
+const getContrastColor = (hex: string): string => {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return luminance > 0.5 ? '#1a1a1a' : '#ffffff';
+};
+
 export const ConfigProvider = ({ children }) => {
   const [username, setUsername] = useState('');
   const [theme, setTheme] = useState('light');
@@ -38,7 +46,9 @@ export const ConfigProvider = ({ children }) => {
     await storageService.setItem(key, value);
   };
 
-  if (loading) return null; // or a loader if necessary
+  if (loading) return null;
+
+  const textColor = getContrastColor(primaryColor);
 
   return (
     <ConfigContext.Provider
@@ -51,6 +61,7 @@ export const ConfigProvider = ({ children }) => {
         setPrimaryColor: (val) => saveConfig('config_primaryColor', val, setPrimaryColor),
         emojiFiesta,
         setEmojiFiesta: (val) => saveConfig('config_emojiFiesta', val, setEmojiFiesta),
+        textColor,
       }}
     >
       {children}

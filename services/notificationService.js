@@ -3,16 +3,23 @@ import * as Notifications from 'expo-notifications';
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
     shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: true,
   }),
 });
 
-const notificationService = {
+export const notificationService = {
   async requestNotificationPermissions() {
     try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      return status === 'granted';
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      return finalStatus === 'granted';
     } catch (error) {
       console.warn('Error requesting permissions:', error);
       return false;
@@ -22,63 +29,119 @@ const notificationService = {
   async schedulePushNotification(title, body, delaySeconds = 5, data = {}) {
     try {
       await Notifications.scheduleNotificationAsync({
-        content: {
-          title,
-          body,
-          data,
-          sound: true,
-          badge: 1,
-        },
-        trigger: { seconds: delaySeconds },
+        content: { title, body, data, sound: true, badge: 1 },
+        trigger: { type: 'timeInterval', seconds: delaySeconds, repeats: false },
       });
     } catch (error) {
       console.warn('Error scheduling notification:', error);
     }
   },
 
-  async scheduleReminderForFiesta(fiesta) {
+  async sendLocalNotification(title, body, data = {}) {
     try {
-      const fiestaDate = new Date(fiesta.fecha);
-      fiestaDate.setHours(10, 0, 0, 0);
+      await Notifications.scheduleNotificationAsync({
+        content: { title, body, data, sound: true, badge: 1 },
+        trigger: { type: 'timeInterval', seconds: 1, repeats: false },
+      });
+    } catch (error) {
+      console.warn('Error sending local notification:', error);
+    }
+  },
 
-      const now = new Date();
-      const delaySeconds = Math.floor((fiestaDate.getTime() - now.getTime()) / 1000);
+  async scheduleAllRemindersForFiesta(fiesta) {
+    const ids = [];
+    const diasAntes = [
+      { dias: 7, msg: '¡Quedan 7 días para la fiesta!' },
+      { dias: 4, msg: '¡Quedan 4 días para la fiesta!' },
+      { dias: 2, msg: '¡Quedan 2 días! Prepárate.' },
+      { dias: 1, msg: '¡Mañana es la folixa! No te la pierdas 🎉' },
+    ];
 
-      if (delaySeconds > 0) {
-        await Notifications.scheduleNotificationAsync({
+    for (const { dias, msg } of diasAntes) {
+      try {
+        const triggerDate = new Date(fiesta.fecha);
+        triggerDate.setHours(10, 0, 0, 0);
+        triggerDate.setDate(triggerDate.getDate() - dias);
+
+        const secondsUntil = Math.floor((triggerDate.getTime() - Date.now()) / 1000);
+        if (secondsUntil < 60) continue;
+
+        const id = await Notifications.scheduleNotificationAsync({
           content: {
-            title: `🎪 Recordatorio: ${fiesta.nombre}`,
-            body: `Tu fiesta es mañana en ${fiesta.concejo}`,
-            data: { fiestaPorId: fiesta.id, tipo: 'recordatorio' },
+            title: `🎪 ${fiesta.nombre}`,
+            body: `${msg} ${fiesta.concejo}`,
+            data: { fiestaId: fiesta.id, tipo: 'recordatorio' },
             sound: true,
           },
-          trigger: { seconds: delaySeconds },
+          trigger: { type: 'timeInterval', seconds: secondsUntil, repeats: false },
         });
+        ids.push(id);
+      } catch (e) {
+        console.warn(`Error programando recordatorio -${dias}d:`, e);
       }
-    } catch (error) {
-      console.warn('Error scheduling reminder:', error);
     }
+    return ids;
+  },
+
+  async cancelAllRemindersForFiesta(notificationIds) {
+    for (const id of notificationIds) {
+      try {
+        await Notifications.cancelScheduledNotificationAsync(id);
+      } catch (e) {
+        console.warn('Error cancelando notificación:', e);
+      }
+    }
+  },
+
+  async scheduleReminderForFiesta(fiesta) {
+    return this.scheduleAllRemindersForFiesta(fiesta);
+  },
+
+  async cancelReminderForFiesta(notificationId) {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+    } catch (error) {
+      console.warn('Error canceling reminder:', error);
+    }
+  },
+
+  async cancelNotification(notificationId) {
+    try {
+      await Notifications.cancelScheduledNotificationAsync(notificationId);
+    } catch (error) {
+      console.warn('Error canceling notification:', error);
+    }
+  },
+
+  async cancelAllNotifications() {
+    await Notifications.cancelAllScheduledNotificationsAsync();
   },
 
   async notifyNewFiestaInZone(fiesta, distance) {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: `🎉 Nueva fiesta cerca`,
+          title: '🎉 Nueva fiesta cerca',
           body: `${fiesta.nombre} en ${fiesta.concejo} (${distance.toFixed(1)} km)`,
-          data: { fiestaPorId: fiesta.id, tipo: 'nueva', concejo: fiesta.concejo },
+          data: { fiestaId: fiesta.id, tipo: 'nueva', concejo: fiesta.concejo },
           sound: true,
         },
-        trigger: { seconds: 3 },
+        trigger: { type: 'timeInterval', seconds: 3, repeats: false },
       });
     } catch (error) {
       console.warn('Error notifying new fiesta:', error);
     }
   },
 
-  async clearOldNotifications() {
-    // Placeholder for future implementation
+  onNotificationReceived(callback) {
+    return Notifications.addNotificationReceivedListener(callback);
+  },
+
+  onNotificationPressed(callback) {
+    return Notifications.addNotificationResponseReceivedListener(callback);
+  },
+
+  removeListeners(subscriptions) {
+    subscriptions.forEach(sub => sub.remove());
   },
 };
-
-export { notificationService };

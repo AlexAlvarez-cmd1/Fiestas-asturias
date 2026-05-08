@@ -2,8 +2,8 @@ import DateTimePicker from '@react-native-community/datetimepicker';
 import Slider from '@react-native-community/slider';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useRef, useState } from 'react';
-import { ActivityIndicator, Alert, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { ActivityIndicator, Animated, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import { useConfig } from '../../contexts/ConfigContext';
 
@@ -29,7 +29,20 @@ function calcularDistancia(lat1, lon1, lat2, lon2) {
 export default function PantallaMapa() {
   const router = useRouter();
   const mapRef = useRef(null);
-  const { emojiFiesta, primaryColor } = useConfig();
+  const { emojiFiesta, primaryColor, theme, textColor } = useConfig();
+  const isDark = theme === 'dark';
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.25, duration: 900, useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 900, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
   
   const [listaDeFiestas, setListaDeFiestas] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -86,21 +99,6 @@ export default function PantallaMapa() {
             setListaDeFiestas(fiestasDescargadas);
           }
 
-          if (gpsReal && gpsReal.lat) {
-            fiestasDescargadas.forEach((fiesta) => {
-              if (fiesta.ubicacion) {
-                const dist = calcularDistancia(
-                  gpsReal.lat,
-                  gpsReal.lon,
-                  fiesta.ubicacion.latitude,
-                  fiesta.ubicacion.longitude
-                );
-                if (dist <= 30) {
-                  notificationService.notifyNewFiestaInZone(fiesta, dist);
-                }
-              }
-            });
-          }
         } catch (error) {
           console.warn("Error conectando con Firebase:", error);
         }
@@ -189,17 +187,71 @@ export default function PantallaMapa() {
   if (cargando) {
     return (
       <View style={[styles.pantallaCarga, { backgroundColor: primaryColor }]}>
-        <ActivityIndicator size="large" color="#F59E0B" />
-        <Text style={styles.textoCarga}>Localizando folixas...</Text>
+        <Animated.Text style={[styles.logoEmoji, { transform: [{ scale: pulseAnim }] }]}>
+          {emojiFiesta}
+        </Animated.Text>
+        <Text style={[styles.logoTitulo, { color: textColor }]}>Folixa</Text>
+        <Text style={[styles.textoCarga, { color: textColor, opacity: 0.8 }]}>
+          Localizando folixas...
+        </Text>
+        <ActivityIndicator size="large" color={textColor} style={{ marginTop: 20 }} />
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
+      <MapView
+        ref={mapRef}
+        style={StyleSheet.absoluteFill}
+        initialRegion={{ latitude: gpsReal.lat, longitude: gpsReal.lon, latitudeDelta: 0.5, longitudeDelta: 0.5 }}
+        onRegionChangeComplete={(region) => {
+          setRegionVista(region);
+          const diff = calcularDistancia(centroFiltro.lat, centroFiltro.lon, region.latitude, region.longitude);
+          if (diff > 5) setMostrarBotonZona(true);
+        }}
+      >
+        <Circle
+          center={{ latitude: centroFiltro.lat, longitude: centroFiltro.lon }}
+          radius={radioKm * 1000}
+          fillColor="rgba(22, 101, 52, 0.1)"
+          strokeColor="rgba(22, 101, 52, 0.3)"
+        />
+
+        <Marker coordinate={{ latitude: centroFiltro.lat, longitude: centroFiltro.lon }} title="Buscando desde aquí">
+
+        </Marker>
+
+        <Marker coordinate={{ latitude: gpsReal.lat, longitude: gpsReal.lon }} title="Tú">
+          <View style={styles.puntoGps} />
+        </Marker>
+
+        {fiestasFiltradas.map((fiesta) => (
+          <Marker
+            key={fiesta.id}
+            coordinate={{ latitude: fiesta.ubicacion.latitude, longitude: fiesta.ubicacion.longitude }}
+            onPress={() => {
+              router.push({
+                  pathname: '/detalle',
+                  params: {
+                    id: fiesta.id, nombre: fiesta.nombre, concejo: fiesta.concejo,
+                    fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
+                    latitud: fiesta.ubicacion.latitude, longitud: fiesta.ubicacion.longitude,
+                    esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity
+                  }
+              });
+            }}
+          >
+            <View style={[styles.marcador, { borderColor: primaryColor }]} pointerEvents="none">
+              <Text style={{ fontSize: 22 }}>{emojiFiesta}</Text>
+            </View>
+          </Marker>
+        ))}
+      </MapView>
+
       <View style={[styles.panelControl, { backgroundColor: primaryColor }]}>
         <View style={styles.headerPanel}>
-          <Text style={styles.textoLabel}>Radio: {Math.round(radioKm)} km</Text>
+          <Text style={[styles.textoLabel, { color: textColor }]}>Radio: {Math.round(radioKm)} km</Text>
           <View style={{ flexDirection: 'row', gap: 10 }}>
             <TouchableOpacity
               style={[styles.btnLupa, soloFavoritos && styles.btnActivoFondo]}
@@ -224,11 +276,11 @@ export default function PantallaMapa() {
         <View style={styles.rowFechas}>
           <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'inicio' && styles.btnActivo]} onPress={() => setModoPicker('inicio')}>
             <Text style={styles.lblFecha}>DESDE</Text>
-            <Text style={styles.valFecha}>{fechaInicio ? fechaInicio.toLocaleDateString() : 'Hoy'}</Text>
+            <Text style={[styles.valFecha, { color: textColor }]}>{fechaInicio ? fechaInicio.toLocaleDateString() : 'Hoy'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'fin' && styles.btnActivo]} onPress={() => setModoPicker('fin')}>
             <Text style={styles.lblFecha}>HASTA</Text>
-            <Text style={styles.valFecha}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
+            <Text style={[styles.valFecha, { color: textColor }]}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
           </TouchableOpacity>
           {(fechaInicio || fechaFin) && (
             <TouchableOpacity style={styles.btnLimpiar} onPress={() => { setFechaInicio(null); setFechaFin(null); setModoPicker(null); }}>
@@ -262,42 +314,46 @@ export default function PantallaMapa() {
         onRequestClose={() => setModalFiltrosVisible(false)}
       >
         <View style={styles.modalFiltrosFondo}>
-          <View style={styles.modalFiltrosContenido}>
+          <View style={[styles.modalFiltrosContenido, isDark && styles.modalFiltrosContenidoDark]}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitulo}>🔍 Filtros</Text>
+              <Text style={[styles.modalTitulo, { color: isDark ? '#f1f1f1' : primaryColor }]}>
+                🔍 Filtros
+              </Text>
               <TouchableOpacity onPress={() => setModalFiltrosVisible(false)}>
-                <Text style={styles.btnCerrarModal}>✕</Text>
+                <Text style={[styles.btnCerrarModal, { color: isDark ? '#aaa' : '#999' }]}>✕</Text>
               </TouchableOpacity>
             </View>
 
             <TextInput
-              style={styles.inputModal}
+              style={[styles.inputModal, isDark && styles.inputModalDark]}
               placeholder="Buscar por nombre de fiesta..."
               value={busqueda}
               onChangeText={setBusqueda}
-              placeholderTextColor="#999"
+              placeholderTextColor={isDark ? '#666' : '#999'}
             />
 
             <TextInput
-              style={styles.inputModal}
+              style={[styles.inputModal, isDark && styles.inputModalDark]}
               placeholder="Filtrar por orquesta/banda..."
               value={orquestaFiltro}
               onChangeText={setOrquestaFiltro}
-              placeholderTextColor="#999"
+              placeholderTextColor={isDark ? '#666' : '#999'}
             />
 
             <TouchableOpacity
-              style={styles.btnLimpiarModal}
+              style={[styles.btnLimpiarModal, isDark && styles.btnLimpiarModalDark]}
               onPress={() => { setBusqueda(''); setOrquestaFiltro(''); }}
             >
-              <Text style={styles.textoLimpiarModal}>🔄 Limpiar filtros</Text>
+              <Text style={[styles.textoLimpiarModal, isDark && { color: '#ff9041' }]}>
+                🔄 Limpiar filtros
+              </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
-              style={styles.btnCerrarFiltros}
+              style={[styles.btnCerrarFiltros, { backgroundColor: primaryColor }]}
               onPress={() => setModalFiltrosVisible(false)}
             >
-              <Text style={styles.textoCerrarFiltros}>Cerrar</Text>
+              <Text style={[styles.textoCerrarFiltros, { color: textColor }]}>Cerrar</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -309,56 +365,6 @@ export default function PantallaMapa() {
           <Text style={styles.textoBusqueda}>🔍 Buscar en esta zona</Text>
         </TouchableOpacity>
       )}
-
-      <MapView 
-        ref={mapRef}
-        style={styles.map} 
-        initialRegion={{ latitude: gpsReal.lat, longitude: gpsReal.lon, latitudeDelta: 0.5, longitudeDelta: 0.5 }}
-        onRegionChangeComplete={(region) => {
-          setRegionVista(region);
-          const diff = calcularDistancia(centroFiltro.lat, centroFiltro.lon, region.latitude, region.longitude);
-          if (diff > 5) setMostrarBotonZona(true);
-        }}
-      >
-        <Circle 
-          center={{ latitude: centroFiltro.lat, longitude: centroFiltro.lon }} 
-          radius={radioKm * 1000} 
-          fillColor="rgba(22, 101, 52, 0.1)" 
-          strokeColor="rgba(22, 101, 52, 0.3)" 
-        />
-
-        {/* Punto de búsqueda central */}
-        <Marker coordinate={{ latitude: centroFiltro.lat, longitude: centroFiltro.lon }} title="Buscando desde aquí">
-          
-        </Marker>
-
-        {/* Tu punto azul */}
-        <Marker coordinate={{ latitude: gpsReal.lat, longitude: gpsReal.lon }} title="Tú">
-          <View style={styles.puntoGps} />
-        </Marker>
-        
-        {fiestasFiltradas.map((fiesta) => (
-          <Marker 
-            key={fiesta.id} 
-            coordinate={{ latitude: fiesta.ubicacion.latitude, longitude: fiesta.ubicacion.longitude }} 
-            onPress={() => {
-              router.push({ 
-                  pathname: '/detalle', 
-                  params: { 
-                    id: fiesta.id, nombre: fiesta.nombre, concejo: fiesta.concejo,
-                    fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
-                    latitud: fiesta.ubicacion.latitude, longitud: fiesta.ubicacion.longitude,
-                    esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity
-                  }
-              });
-            }}
-          >
-            <View style={[styles.marcador, { borderColor: primaryColor }]} pointerEvents="none">
-              <Text style={{ fontSize: 22 }}>{emojiFiesta}</Text>
-            </View>
-          </Marker>
-        ))}
-      </MapView>
 
       {/* BOTONES FLOTANTES LATERALES */}
       <TouchableOpacity style={[styles.btnFlotanteCirculo, { bottom: 95, backgroundColor: primaryColor }]} onPress={() => router.push('/nueva')}>
@@ -374,9 +380,10 @@ export default function PantallaMapa() {
 }
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  map: { flex: 1 },
-  pantallaCarga: { flex: 1, backgroundColor: '#166534', justifyContent: 'center', alignItems: 'center' },
-  textoCarga: { color: 'white', fontSize: 18, fontWeight: 'bold', marginTop: 20 },
+  pantallaCarga: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  logoEmoji: { fontSize: 70, marginBottom: 10 },
+  logoTitulo: { fontSize: 42, fontWeight: 'bold', letterSpacing: 2, marginBottom: 8 },
+  textoCarga: { fontSize: 16, fontWeight: '600', marginTop: 10 },
   panelControl: { paddingTop: 70, paddingHorizontal: 20, paddingBottom: 20  , backgroundColor: '#166534', borderBottomLeftRadius: 30, borderBottomRightRadius: 30, zIndex: 10, elevation: 10 },
   textoLabel: { color: 'white', fontWeight: 'bold', marginBottom: 5 },
   rowFechas: { flexDirection: 'row', marginTop: 15, gap: 10 },
@@ -401,6 +408,9 @@ const styles = StyleSheet.create({
 
   modalFiltrosFondo: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
   modalFiltrosContenido: { backgroundColor: 'white', borderTopLeftRadius: 25, borderTopRightRadius: 25, padding: 20, maxHeight: '80%' },
+  modalFiltrosContenidoDark: { backgroundColor: '#1e1e1e' },
+  inputModalDark: { backgroundColor: '#2c2c2c', borderColor: '#444', color: '#f1f1f1' },
+  btnLimpiarModalDark: { backgroundColor: '#2c1a0e' },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   modalTitulo: { fontSize: 20, fontWeight: 'bold', color: '#166534' },
   btnCerrarModal: { fontSize: 28, color: '#999', fontWeight: 'bold' },
