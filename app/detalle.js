@@ -5,6 +5,7 @@ import { ActivityIndicator, Alert, Image, Linking, Modal, ScrollView, StyleSheet
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../firebaseConfig';
 import { useFavorite } from '../hooks/useFavorite';
+import { notificationService } from '../services/notificationService';
 import { storageService } from '../services/storageService';
 
 export default function PantallaDetalle() {
@@ -15,7 +16,8 @@ export default function PantallaDetalle() {
   
   const [modalVisible, setModalVisible] = useState(false);
   const [cargandoEliminar, setCargandoEliminar] = useState(false);
-  
+  const [imagenCargada, setImagenCargada] = useState(false);
+
   // Asistencia
   const [asistentesCount, setAsistentesCount] = useState(0);
   const [hasAttended, setHasAttended] = useState(false);
@@ -153,7 +155,17 @@ export default function PantallaDetalle() {
           {imagen && (
             <TouchableOpacity activeOpacity={0.8} onPress={() => setModalVisible(true)}>
               <View style={styles.contenedorCartelPequeño}>
-                <Image source={{ uri: imagen }} style={styles.cartel} resizeMode="cover" />
+                {!imagenCargada && (
+                  <View style={[styles.cartel, styles.placeholderImagen]}>
+                    <Text style={styles.textoPlaceholder}>⛺</Text>
+                  </View>
+                )}
+                <Image
+                  source={{ uri: imagen }}
+                  style={[styles.cartel, !imagenCargada && { position: 'absolute', opacity: 0 }]}
+                  resizeMode="cover"
+                  onLoad={() => setImagenCargada(true)}
+                />
                 <View style={styles.etiquetaAmpliar}>
                   <Text style={styles.textoAmpliar}>🔍 Ver cartel completo</Text>
                 </View>
@@ -228,11 +240,21 @@ export default function PantallaDetalle() {
               )}
             </View>
 
-            <TouchableOpacity 
-              style={styles.btnEditar} 
+            <TouchableOpacity
+              style={styles.btnEditar}
               onPress={() => router.push({ pathname: '/editar', params: params })}
             >
               <Text style={styles.btnTextoEditar}>📝 EDITAR FIESTA</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={styles.btnRecordatorio}
+              onPress={() => {
+                notificationService.scheduleReminderForFiesta({ id, nombre, fecha, concejo });
+                Alert.alert("✅ Recordatorio programado", `Te avisaremos el día anterior a "${nombre}"`);
+              }}
+            >
+              <Text style={styles.btnTextoRecordatorio}>🔔 RECORDARME</Text>
             </TouchableOpacity>
 
             <TouchableOpacity style={styles.botonEliminar} onPress={manejarEliminacion} disabled={cargandoEliminar}>
@@ -271,6 +293,8 @@ const styles = StyleSheet.create({
   infoCard: { backgroundColor: 'white', margin: 15, borderRadius: 20, overflow: 'hidden', elevation: 5 },
   contenedorCartelPequeño: { position: 'relative' },
   cartel: { width: '100%', height: 300 },
+  placeholderImagen: { backgroundColor: '#e2e8f0', justifyContent: 'center', alignItems: 'center' },
+  textoPlaceholder: { fontSize: 60, opacity: 0.3 },
   etiquetaAmpliar: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 8, borderRadius: 10 },
   textoAmpliar: { color: 'white', fontSize: 12, fontWeight: 'bold' },
   textoContainer: { padding: 20 },
@@ -295,6 +319,8 @@ const styles = StyleSheet.create({
   emoji: { fontSize: 24 },
   btnEditar: { backgroundColor: '#e2e8f0', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 20 },
   btnTextoEditar: { color: '#475569', fontWeight: 'bold' },
+  btnRecordatorio: { backgroundColor: '#FCD34D', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 12 },
+  btnTextoRecordatorio: { color: '#744210', fontWeight: 'bold' },
   botonEliminar: { marginTop: 30, alignItems: 'center', padding: 10 },
   btnTextEliminar: { color: '#94a3b8', fontSize: 13, textDecorationLine: 'underline' },
   modalFondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },

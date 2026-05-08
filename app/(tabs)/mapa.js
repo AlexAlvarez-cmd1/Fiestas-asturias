@@ -12,6 +12,12 @@ import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { favoritesService } from '../../services/favoritesService';
 
+// NOTIFICACIONES
+import { notificationService } from '../../services/notificationService';
+
+// CACHÉ
+import { cacheService } from '../../services/cacheService';
+
 function calcularDistancia(lat1, lon1, lat2, lon2) {
   const R = 6371;
   const dLat = (lat2 - lat1) * (Math.PI / 180);
@@ -57,14 +63,46 @@ export default function PantallaMapa() {
         } catch (error) { console.warn("Error GPS:", error); }
 
         try {
+          await notificationService.requestNotificationPermissions();
+        } catch (error) {
+          console.warn("Error notificaciones:", error);
+        }
+
+        // CACHÉ: Intentar leer caché primero
+        const cachedFiestas = await cacheService.getCachedFiestas();
+        if (cachedFiestas && cachedFiestas.length > 0) {
+          setListaDeFiestas(cachedFiestas);
+        }
+
+        try {
           const querySnapshot = await getDocs(collection(db, "fiestas"));
           const fiestasDescargadas = [];
           querySnapshot.forEach((doc) => {
             fiestasDescargadas.push({ id: doc.id, ...doc.data() });
           });
-          setListaDeFiestas(fiestasDescargadas);
+
+          if (fiestasDescargadas.length > 0) {
+            await cacheService.setCachedFiestas(fiestasDescargadas);
+            setListaDeFiestas(fiestasDescargadas);
+          }
+
+          if (gpsReal && gpsReal.lat) {
+            fiestasDescargadas.forEach((fiesta) => {
+              if (fiesta.ubicacion) {
+                const dist = calcularDistancia(
+                  gpsReal.lat,
+                  gpsReal.lon,
+                  fiesta.ubicacion.latitude,
+                  fiesta.ubicacion.longitude
+                );
+                if (dist <= 30) {
+                  notificationService.notifyNewFiestaInZone(fiesta, dist);
+                }
+              }
+            });
+          }
         } catch (error) {
-          Alert.alert("Error", "No se pudo conectar con Firebase.");
+          console.warn("Error conectando con Firebase:", error);
         }
 
         try {
