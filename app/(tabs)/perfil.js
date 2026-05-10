@@ -1,11 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
-  ActivityIndicator, Alert, Animated, Dimensions, Image, ImageBackground, Modal,
+  ActivityIndicator, Alert, Dimensions, Image, ImageBackground, Modal,
   ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
+import ImageModal from '../../components/ImageModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { useAuth } from '../../contexts/AuthContext';
@@ -18,7 +19,6 @@ import { LOGROS_DEF, logrosService } from '../../services/logrosService';
 import { userService } from '../../services/userService';
 
 const SCREEN_WIDTH = Dimensions.get('window').width;
-const SCREEN_H = Dimensions.get('window').height;
 const BANNER_HEIGHT = Math.round(SCREEN_WIDTH / 3);
 
 export default function PantallaPerfil() {
@@ -39,7 +39,6 @@ export default function PantallaPerfil() {
   const [logros, setLogros] = useState([]);
   const [subiendoFoto, setSubiendoFoto] = useState(false);
   const [subiendoBanner, setSubiendoBanner] = useState(false);
-  const [fotoAmpliada, setFotoAmpliada] = useState(false);
   const [bannerAmpliad, setBannerAmpliad] = useState(false);
   const [logroInfo, setLogroInfo] = useState(null);
 
@@ -190,57 +189,26 @@ export default function PantallaPerfil() {
   const pickBanner = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== 'granted') return;
-    const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [16, 5] });
-    if (!r.canceled) subirImagen(r.assets[0].uri, `perfiles/${user.uid}/banner.jpg`, 'bannerURL', setSubiendoBanner);
+    Alert.alert('Banner', '¿Desde dónde?', [
+      {
+        text: '📷 Cámara', onPress: async () => {
+          const cam = await ImagePicker.requestCameraPermissionsAsync();
+          if (cam.status !== 'granted') return;
+          const r = await ImagePicker.launchCameraAsync({ quality: 0.7, allowsEditing: true, aspect: [16, 5] });
+          if (!r.canceled) subirImagen(r.assets[0].uri, `perfiles/${user.uid}/banner.jpg`, 'bannerURL', setSubiendoBanner);
+        },
+      },
+      {
+        text: '🖼️ Galería', onPress: async () => {
+          const r = await ImagePicker.launchImageLibraryAsync({ quality: 0.7, allowsEditing: true, aspect: [16, 5] });
+          if (!r.canceled) subirImagen(r.assets[0].uri, `perfiles/${user.uid}/banner.jpg`, 'bannerURL', setSubiendoBanner);
+        },
+      },
+      { text: 'Cancelar', style: 'cancel' },
+    ]);
   };
 
-  // Zoom foto perfil
-  const avatarMeasureRef = useRef(null);
   const [zoomVisible, setZoomVisible] = useState(false);
-  const [zoomOrigin, setZoomOrigin] = useState({ x: 0, y: 0, w: 96, h: 96 });
-  const zoomAnim = useRef(new Animated.Value(0)).current;
-  const bgOpacity = useRef(new Animated.Value(0)).current;
-
-  const abrirZoom = () => {
-    if (!userProfile?.photoURL) return;
-    avatarMeasureRef.current?.measure((fx, fy, w, h, px, py) => {
-      setZoomOrigin({ x: px, y: py, w, h });
-      setZoomVisible(true);
-      zoomAnim.setValue(0);
-      bgOpacity.setValue(0);
-      Animated.parallel([
-        Animated.spring(zoomAnim, { toValue: 1, useNativeDriver: false, damping: 22, stiffness: 220 }),
-        Animated.timing(bgOpacity, { toValue: 1, duration: 200, useNativeDriver: false }),
-      ]).start();
-    });
-  };
-
-  const cerrarZoom = () => {
-    Animated.parallel([
-      Animated.spring(zoomAnim, { toValue: 0, useNativeDriver: false, damping: 22, stiffness: 220 }),
-      Animated.timing(bgOpacity, { toValue: 0, duration: 180, useNativeDriver: false }),
-    ]).start(() => setZoomVisible(false));
-  };
-
-  const modalOpacity = useRef(new Animated.Value(0)).current;
-  const modalScale = useRef(new Animated.Value(0.85)).current;
-
-  const abrirModal = (setter) => {
-    setter(true);
-    modalOpacity.setValue(0);
-    modalScale.setValue(0.85);
-    Animated.parallel([
-      Animated.timing(modalOpacity, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.spring(modalScale, { toValue: 1, useNativeDriver: true, damping: 18, stiffness: 200 }),
-    ]).start();
-  };
-
-  const cerrarModal = (setter) => {
-    Animated.parallel([
-      Animated.timing(modalOpacity, { toValue: 0, duration: 160, useNativeDriver: true }),
-      Animated.timing(modalScale, { toValue: 0.88, duration: 160, useNativeDriver: true }),
-    ]).start(() => setter(false));
-  };
 
   const handleLogout = () => {
     Alert.alert('Cerrar sesión', '¿Seguro que quieres salir?', [
@@ -277,7 +245,7 @@ export default function PantallaPerfil() {
       <View style={[styles.headerWrapper, isDark && styles.headerWrapperDark]}>
         <View>
           <TouchableOpacity
-            onPress={() => userProfile?.bannerURL && abrirModal(setBannerAmpliad)}
+            onPress={() => userProfile?.bannerURL && setBannerAmpliad(true)}
             activeOpacity={userProfile?.bannerURL ? 0.92 : 1}
           >
             <ImageBackground
@@ -288,6 +256,11 @@ export default function PantallaPerfil() {
               {subiendoBanner && <ActivityIndicator color="white" size="large" style={StyleSheet.absoluteFill} />}
             </ImageBackground>
           </TouchableOpacity>
+          {(userProfile?.isAdmin === true || userProfile?.isAdmin === 'true') && (
+            <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
+              <Text style={styles.btnAdminTxt}>⚙️</Text>
+            </TouchableOpacity>
+          )}
           <TouchableOpacity style={styles.btnSalir} onPress={handleLogout}>
             <Text style={styles.btnSalirTxt}>Salir</Text>
           </TouchableOpacity>
@@ -297,15 +270,15 @@ export default function PantallaPerfil() {
         </View>
 
         <View style={styles.avatarCentrado}>
-          <TouchableOpacity onPress={abrirZoom} activeOpacity={0.85}>
+          <TouchableOpacity onPress={() => userProfile?.photoURL && setZoomVisible(true)} activeOpacity={0.85}>
             {subiendoFoto ? (
               <View style={[styles.avatarCircle, { backgroundColor: primaryColor }]}>
                 <ActivityIndicator color="white" />
               </View>
             ) : userProfile?.photoURL ? (
-              <Image ref={avatarMeasureRef} source={{ uri: userProfile.photoURL }} style={styles.avatarImg} />
+              <Image source={{ uri: userProfile.photoURL }} style={styles.avatarImg} />
             ) : (
-              <View ref={avatarMeasureRef} style={[styles.avatarCircle, { backgroundColor: primaryColor }]}>
+              <View style={[styles.avatarCircle, { backgroundColor: primaryColor }]}>
                 <Text style={styles.avatarText}>{iniciales(displayName)}</Text>
               </View>
             )}
@@ -508,44 +481,33 @@ export default function PantallaPerfil() {
         </ScrollView>
       )}
 
-      {/* MODAL BANNER */}
-      <Modal visible={bannerAmpliad} transparent animationType="none" onRequestClose={() => cerrarModal(setBannerAmpliad)}>
-        <Animated.View style={[{ flex: 1 }, { opacity: modalOpacity }]}>
-          <TouchableOpacity activeOpacity={1} onPress={() => cerrarModal(setBannerAmpliad)} style={{ flex: 1 }}>
-            <ImageBackground source={{ uri: userProfile?.bannerURL }} style={styles.modalFondo} resizeMode="cover" blurRadius={10}>
-              <View style={styles.modalOverlay}>
-                <Animated.Image
-                  source={{ uri: userProfile?.bannerURL }}
-                  style={[styles.bannerAmpliadoImg, { transform: [{ scale: modalScale }] }]}
-                  resizeMode="contain"
-                />
-                <Text style={styles.modalCerrarTxt}>Toca para cerrar</Text>
-              </View>
-            </ImageBackground>
+      <ImageModal
+        visible={bannerAmpliad}
+        onClose={() => setBannerAmpliad(false)}
+        imageUrl={userProfile?.bannerURL}
+        footer={
+          <TouchableOpacity
+            style={styles.btnEditarEnModal}
+            onPress={() => { setBannerAmpliad(false); setTimeout(pickBanner, 200); }}
+          >
+            <Text style={styles.btnEditarEnModalTxt}>🖼️ Cambiar banner</Text>
           </TouchableOpacity>
-        </Animated.View>
-      </Modal>
+        }
+      />
 
-      {/* ZOOM FOTO PERFIL */}
-      {zoomVisible && (
-        <TouchableOpacity activeOpacity={1} onPress={cerrarZoom} style={StyleSheet.absoluteFill}>
-          <Animated.View style={[StyleSheet.absoluteFill, { backgroundColor: 'black', opacity: bgOpacity }]} />
-          <Animated.View style={{
-            position: 'absolute',
-            left:         zoomAnim.interpolate({ inputRange: [0,1], outputRange: [zoomOrigin.x, SCREEN_WIDTH * 0.075] }),
-            top:          zoomAnim.interpolate({ inputRange: [0,1], outputRange: [zoomOrigin.y, SCREEN_H / 2 - SCREEN_WIDTH * 0.425] }),
-            width:        zoomAnim.interpolate({ inputRange: [0,1], outputRange: [zoomOrigin.w, SCREEN_WIDTH * 0.85] }),
-            height:       zoomAnim.interpolate({ inputRange: [0,1], outputRange: [zoomOrigin.h, SCREEN_WIDTH * 0.85] }),
-            borderRadius: zoomAnim.interpolate({ inputRange: [0,1], outputRange: [zoomOrigin.w / 2, SCREEN_WIDTH * 0.425] }),
-            overflow: 'hidden',
-          }}>
-            <Image source={{ uri: userProfile?.photoURL }} style={{ flex: 1 }} resizeMode="cover" />
-          </Animated.View>
-          <Animated.Text style={[styles.modalCerrarTxt, { position: 'absolute', bottom: 50, alignSelf: 'center', opacity: bgOpacity }]}>
-            Toca para cerrar
-          </Animated.Text>
-        </TouchableOpacity>
-      )}
+      <ImageModal
+        visible={zoomVisible}
+        onClose={() => setZoomVisible(false)}
+        imageUrl={userProfile?.photoURL}
+        footer={
+          <TouchableOpacity
+            style={styles.btnEditarEnModal}
+            onPress={() => { setZoomVisible(false); setTimeout(pickFotoPerfil, 200); }}
+          >
+            <Text style={styles.btnEditarEnModalTxt}>📷 Cambiar foto de perfil</Text>
+          </TouchableOpacity>
+        }
+      />
 
       {/* TOOLTIP LOGRO */}
       <Modal visible={!!logroInfo} transparent animationType="fade" onRequestClose={() => setLogroInfo(null)}>
@@ -606,6 +568,8 @@ const styles = StyleSheet.create({
   headerWrapperDark: { backgroundColor: '#1a1a1a' },
   banner: { width: '100%', height: BANNER_HEIGHT },
   bannerGradient: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
+  btnAdmin: { position: 'absolute', top: 12, right: 74, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 20 },
+  btnAdminTxt: { fontSize: 16 },
   btnSalir: { position: 'absolute', top: 12, right: 14, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 20 },
   btnSalirTxt: { color: 'white', fontSize: 13, fontWeight: '600' },
   btnCambiarBanner: { position: 'absolute', top: 12, left: 14, backgroundColor: 'rgba(0,0,0,0.4)', paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20 },
@@ -675,9 +639,13 @@ const styles = StyleSheet.create({
   logroEstado: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20 },
   logroEstadoTxt: { fontSize: 13, fontWeight: '600' },
 
-  // Banner modal
-  modalFondo: { flex: 1 },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.45)', justifyContent: 'center', alignItems: 'center' },
-  bannerAmpliadoImg: { width: SCREEN_WIDTH, height: SCREEN_WIDTH / 3 * 2 },
-  modalCerrarTxt: { color: 'rgba(255,255,255,0.55)', marginTop: 24, fontSize: 13 },
+  btnEditarEnModal: {
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.35)',
+    paddingHorizontal: 28,
+    paddingVertical: 13,
+    borderRadius: 24,
+  },
+  btnEditarEnModalTxt: { color: 'white', fontWeight: '600', fontSize: 15 },
 });

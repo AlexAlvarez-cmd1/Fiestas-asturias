@@ -3,6 +3,7 @@ import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
 import { deleteDoc, doc, increment, onSnapshot, updateDoc } from 'firebase/firestore';
 import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import ImageModal from '../components/ImageModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../contexts/AuthContext';
 import { useConfig } from '../contexts/ConfigContext';
@@ -36,11 +37,15 @@ export default function PantallaDetalle() {
   const [asistentesCount, setAsistentesCount] = useState(0);
   const [hasAttended, setHasAttended] = useState(false);
   const [loadingAttendance, setLoadingAttendance] = useState(true);
+  const [modalAsistentes, setModalAsistentes] = useState(false);
+  const [asistentes, setAsistentes] = useState([]);
+  const [cargandoAsistentes, setCargandoAsistentes] = useState(false);
   
   // Hook para favoritos
   const { isFavorite, toggleFavorite, loading: loadingFavorite } = useFavorite(id);
   const { theme, primaryColor, textColor } = useConfig();
   const isDark = theme === 'dark';
+  const esAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
 
   const handleToggleFavorite = async () => {
     const eraFavorito = isFavorite;
@@ -79,6 +84,24 @@ export default function PantallaDetalle() {
     } catch (e) {
       console.warn('Error cargando fotos:', e);
     }
+  };
+
+  const confirmarBorrarFoto = (foto) => {
+    Alert.alert('¿Eliminar foto?', 'Esta acción no se puede deshacer.', [
+      { text: 'Cancelar', style: 'cancel' },
+      {
+        text: 'Eliminar', style: 'destructive',
+        onPress: async () => {
+          try {
+            await fotosService.deleteFoto(id, foto.id, foto.storagePath);
+            setFotos(prev => prev.filter(f => f.id !== foto.id));
+            if (fotoModal?.id === foto.id) setFotoModal(null);
+          } catch {
+            Alert.alert('Error', 'No se pudo eliminar la foto.');
+          }
+        },
+      },
+    ]);
   };
 
   const handleSubirFoto = async () => {
@@ -126,10 +149,7 @@ export default function PantallaDetalle() {
       const username = userProfile?.username || user.email.split('@')[0];
       await fotosService.uploadFoto(id, uri, user.uid, username);
       await cargarFotos();
-      // Increment photo counter for logros
-      import('../services/userService').then(({ userService }) =>
-        userService.updateProfile(user.uid, { numFotos: (userProfile?.numFotos || 0) + 1 }).catch(() => {})
-      );
+      userService.updateProfile(user.uid, { numFotos: (userProfile?.numFotos || 0) + 1 }).catch(() => {});
     } catch (e) {
       Alert.alert('Error', 'No se pudo subir la foto. Inténtalo de nuevo.');
       console.warn('Error subiendo foto:', e);
@@ -138,15 +158,25 @@ export default function PantallaDetalle() {
     }
   };
 
-  const compartirFiesta = async () => {
+  const buildTextoCompartir = () => {
     const fechaStr = fecha
       ? new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
       : '';
+    return `🎪 ${nombre}\n📅 ${fechaStr}\n📍 ${concejo}${orquesta ? `\n🎵 ${orquesta}` : ''}\n\n¡Descarga Folixa para descubrir más fiestas en Asturias! 🍺`;
+  };
+
+  const compartirWhatsApp = async () => {
+    const texto = buildTextoCompartir();
     try {
-      await Share.share({
-        message: `🎪 ${nombre}\n📅 ${fechaStr}\n📍 ${concejo}${orquesta ? `\n🎵 ${orquesta}` : ''}\n\n¡Descarga Folixa para descubrir más fiestas en Asturias! 🍺`,
-        title: nombre,
-      });
+      await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(texto)}`);
+    } catch {
+      await Share.share({ message: texto, title: nombre });
+    }
+  };
+
+  const compartirNativo = async () => {
+    try {
+      await Share.share({ message: buildTextoCompartir(), title: nombre });
     } catch (error) {
       console.warn('Error compartiendo:', error);
     }
@@ -231,6 +261,20 @@ export default function PantallaDetalle() {
         { text: "Cancelar", style: "cancel" }
       ]
     );
+  };
+
+  const verAsistentes = async () => {
+    if (asistentesCount === 0) return;
+    setModalAsistentes(true);
+    setCargandoAsistentes(true);
+    try {
+      const lista = await userService.getAsistentes(id);
+      setAsistentes(lista);
+    } catch (e) {
+      console.warn('Error cargando asistentes:', e);
+    } finally {
+      setCargandoAsistentes(false);
+    }
   };
 
   const manejarEliminacion = () => {
@@ -358,12 +402,20 @@ export default function PantallaDetalle() {
                   {hasAttended ? '👋 ¡Voy a ir!' : '🤚 Asistiré'}
                 </Text>
               </TouchableOpacity>
-              <View style={styles.contadorContainer}>
+              <TouchableOpacity
+                style={styles.contadorContainer}
+                onPress={verAsistentes}
+                disabled={asistentesCount === 0}
+                activeOpacity={asistentesCount > 0 ? 0.6 : 1}
+              >
                 <Text style={styles.emojiContador}>👥</Text>
                 <Text style={styles.textoContador}>
                   {asistentesCount} {asistentesCount === 1 ? 'persona asistirá' : 'personas asistirán'}
                 </Text>
-              </View>
+                {asistentesCount > 0 && (
+                  <Text style={{ color: '#94a3b8', fontSize: 13, marginLeft: 4 }}>Ver ›</Text>
+                )}
+              </TouchableOpacity>
             </View>
 
             <Text style={styles.labelRuta}>¿CÓMO LLEGAMOS A LA FOLIXA?</Text>
@@ -394,15 +446,22 @@ export default function PantallaDetalle() {
               )}
             </View>
 
-            <TouchableOpacity style={styles.btnCompartir} onPress={compartirFiesta}>
-              <Text style={styles.btnTextoCompartir}>📤 COMPARTIR FIESTA</Text>
+            <TouchableOpacity style={styles.btnWhatsapp} onPress={compartirWhatsApp}>
+              <Text style={styles.btnTextoWhatsapp}>💬 COMPARTIR EN WHATSAPP</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.btnEditar} onPress={() => router.push({ pathname: '/editar', params: params })}>
-              <Text style={styles.btnTextoEditar}>📝 EDITAR FIESTA</Text>
+            <TouchableOpacity style={styles.btnCompartir} onPress={compartirNativo}>
+              <Text style={styles.btnTextoCompartir}>📤 Compartir en otras apps</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.botonEliminar} onPress={manejarEliminacion} disabled={cargandoEliminar}>
-              {cargandoEliminar ? <ActivityIndicator color="#666" /> : <Text style={styles.btnTextEliminar}>Eliminar esta fiesta</Text>}
-            </TouchableOpacity>
+            {esAdmin && (
+              <>
+                <TouchableOpacity style={styles.btnEditar} onPress={() => router.push({ pathname: '/editar', params: params })}>
+                  <Text style={styles.btnTextoEditar}>📝 EDITAR FIESTA</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.botonEliminar} onPress={manejarEliminacion} disabled={cargandoEliminar}>
+                  {cargandoEliminar ? <ActivityIndicator color="#666" /> : <Text style={styles.btnTextEliminar}>Eliminar esta fiesta</Text>}
+                </TouchableOpacity>
+              </>
+            )}
           </View>
         ) : (
           <View style={[styles.tabContent, isDark && styles.tabContentDark]}>
@@ -433,11 +492,25 @@ export default function PantallaDetalle() {
                 keyExtractor={item => item.id}
                 numColumns={3}
                 scrollEnabled={false}
-                renderItem={({ item }) => (
-                  <TouchableOpacity onPress={() => setFotoModal(item)} style={styles.fotoItem}>
-                    <Image source={{ uri: item.imageUrl }} style={styles.fotoThumb} />
-                  </TouchableOpacity>
-                )}
+                renderItem={({ item }) => {
+                  const puedeEliminar = item.uid === user?.uid || esAdmin;
+                  return (
+                    <View style={styles.fotoItem}>
+                      <TouchableOpacity onPress={() => setFotoModal(item)} style={{ flex: 1 }}>
+                        <Image source={{ uri: item.imageUrl }} style={styles.fotoThumb} />
+                      </TouchableOpacity>
+                      {puedeEliminar && (
+                        <TouchableOpacity
+                          style={styles.btnBorrarFoto}
+                          onPress={() => confirmarBorrarFoto(item)}
+                          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                        >
+                          <Text style={styles.btnBorrarFotoTxt}>✕</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+                  );
+                }}
                 style={{ marginTop: 4 }}
               />
             )}
@@ -445,44 +518,70 @@ export default function PantallaDetalle() {
         )}
       </ScrollView>
 
-      {/* MODAL FOTO DE USUARIO */}
-      <Modal visible={!!fotoModal} transparent animationType="fade" onRequestClose={() => setFotoModal(null)}>
-        <View style={styles.modalFondo}>
-          <TouchableOpacity style={styles.botonCerrarModal} onPress={() => setFotoModal(null)}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}>
-            <Text style={styles.textoCerrar}>❌</Text>
-          </TouchableOpacity>
-          {fotoModal && (
-            <View style={{ alignItems: 'center', width: '100%' }}>
-              <Image source={{ uri: fotoModal.imageUrl }} style={styles.cartelGigante} resizeMode="contain" />
-              <Text style={{ color: 'white', marginTop: 10, fontWeight: 'bold', fontSize: 15 }}>
-                📸 {fotoModal.username}
+      {/* MODAL VER ASISTENTES */}
+      <Modal visible={modalAsistentes} transparent animationType="slide" onRequestClose={() => setModalAsistentes(false)}>
+        <TouchableOpacity style={styles.modalAsistentesFondo} activeOpacity={1} onPress={() => setModalAsistentes(false)}>
+          <View style={[styles.modalAsistentesContenido, isDark && styles.infoCardDark]} onStartShouldSetResponder={() => true}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+              <Text style={[styles.modalAsistentesTitulo, isDark && styles.valueDark]}>
+                👥 Asistentes ({asistentesCount})
               </Text>
+              <TouchableOpacity onPress={() => setModalAsistentes(false)} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
+                <Text style={{ fontSize: 20, color: '#94a3b8' }}>✕</Text>
+              </TouchableOpacity>
             </View>
-          )}
-        </View>
+            {cargandoAsistentes ? (
+              <ActivityIndicator color={primaryColor} style={{ marginVertical: 24 }} />
+            ) : asistentes.length === 0 ? (
+              <Text style={{ color: '#94a3b8', textAlign: 'center', marginVertical: 24, fontSize: 15 }}>
+                Nadie ha confirmado asistencia aún
+              </Text>
+            ) : (
+              <ScrollView>
+                {asistentes.map((a) => (
+                  <View key={a.uid} style={styles.asistenteRow}>
+                    <View style={[styles.asistenteAvatar, { backgroundColor: primaryColor }]}>
+                      <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 15 }}>
+                        {(a.username || '?')[0].toUpperCase()}
+                      </Text>
+                    </View>
+                    <Text style={[styles.asistenteNombre, isDark && styles.valueDark]}>
+                      {a.username || 'Usuario'}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
+            )}
+          </View>
+        </TouchableOpacity>
       </Modal>
 
-      <Modal visible={modalVisible} transparent={true} animationType="fade" onRequestClose={() => setModalVisible(false)}>
-        <View style={styles.modalFondo}>
-          <TouchableOpacity 
-            style={styles.botonCerrarModal} 
-            onPress={() => setModalVisible(false)}
-            hitSlop={{ top: 20, bottom: 20, left: 20, right: 20 }}
-          >
-            <Text style={styles.textoCerrar}>❌</Text>
-            <Text style={styles.textoBotonCerrar}>Cerrar</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.areaZoomAtrás} 
-            onPress={() => setModalVisible(false)}
-            activeOpacity={1}
-          >
-            <Image source={{ uri: imagen }} style={styles.cartelGigante} resizeMode="contain" />
-          </TouchableOpacity>
-        </View>
-      </Modal>
+      <ImageModal
+        visible={!!fotoModal}
+        onClose={() => setFotoModal(null)}
+        imageUrl={fotoModal?.imageUrl}
+        footer={fotoModal ? (
+          <>
+            <Text style={{ color: 'white', fontWeight: 'bold', fontSize: 15 }}>
+              📸 {fotoModal.username}
+            </Text>
+            {(fotoModal.uid === user?.uid || esAdmin) && (
+              <TouchableOpacity
+                style={styles.btnBorrarFotoModal}
+                onPress={() => confirmarBorrarFoto(fotoModal)}
+              >
+                <Text style={styles.btnBorrarFotoModalTxt}>🗑️ Eliminar foto</Text>
+              </TouchableOpacity>
+            )}
+          </>
+        ) : null}
+      />
+
+      <ImageModal
+        visible={modalVisible}
+        onClose={() => setModalVisible(false)}
+        imageUrl={imagen}
+      />
     </SafeAreaView>
   );
 }
@@ -529,7 +628,9 @@ const styles = StyleSheet.create({
   weatherTemp: { fontSize: 13, color: '#64748b', marginTop: 2 },
   weatherRainBadge: { backgroundColor: '#dbeafe', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
   weatherRainTxt: { fontSize: 12, color: '#1d4ed8', fontWeight: '600' },
-  btnCompartir: { backgroundColor: '#dbeafe', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 20 },
+  btnWhatsapp: { backgroundColor: '#25D366', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 20 },
+  btnTextoWhatsapp: { color: 'white', fontWeight: 'bold' },
+  btnCompartir: { backgroundColor: '#dbeafe', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 10 },
   btnTextoCompartir: { color: '#1d4ed8', fontWeight: 'bold' },
   btnEditar: { backgroundColor: '#e2e8f0', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 12 },
   btnTextoEditar: { color: '#475569', fontWeight: 'bold' },
@@ -537,12 +638,6 @@ const styles = StyleSheet.create({
   btnTextoRecordatorio: { color: '#744210', fontWeight: 'bold' },
   botonEliminar: { marginTop: 30, alignItems: 'center', padding: 10 },
   btnTextEliminar: { color: '#94a3b8', fontSize: 13, textDecorationLine: 'underline' },
-  modalFondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.95)', justifyContent: 'center', alignItems: 'center' },
-  areaZoomAtrás: { flex: 1, justifyContent: 'center', alignItems: 'center', width: '100%' },
-  cartelGigante: { width: '100%', height: '85%' },
-  botonCerrarModal: { position: 'absolute', top: 40, right: 20, backgroundColor: 'rgba(239, 68, 68, 0.9)', padding: 15, borderRadius: 50, zIndex: 100, minWidth: 60, height: 60, justifyContent: 'center', alignItems: 'center', elevation: 10 },
-  textoCerrar: { color: 'white', fontWeight: 'bold', fontSize: 24, textAlign: 'center' },
-  textoBotonCerrar: { color: 'white', fontWeight: 'bold', fontSize: 10, marginTop: 2, textAlign: 'center' },
 
   // Tabs
   tabBar: {
@@ -569,4 +664,25 @@ const styles = StyleSheet.create({
   galeriaVaciaTxt: { color: '#94a3b8', fontSize: 15, textAlign: 'center' },
   fotoItem: { flex: 1/3, aspectRatio: 1, padding: 1.5 },
   fotoThumb: { flex: 1, borderRadius: 4 },
+  btnBorrarFoto: {
+    position: 'absolute', top: 4, right: 4,
+    backgroundColor: 'rgba(0,0,0,0.6)',
+    width: 22, height: 22, borderRadius: 11,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  btnBorrarFotoTxt: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+  btnBorrarFotoModal: {
+    marginTop: 16, backgroundColor: 'rgba(239,68,68,0.85)',
+    paddingHorizontal: 24, paddingVertical: 12, borderRadius: 12,
+  },
+  btnBorrarFotoModalTxt: { color: 'white', fontWeight: 'bold', fontSize: 15 },
+  modalAsistentesFondo: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+  modalAsistentesContenido: {
+    backgroundColor: 'white', borderTopLeftRadius: 22, borderTopRightRadius: 22,
+    padding: 24, maxHeight: '60%',
+  },
+  modalAsistentesTitulo: { fontSize: 17, fontWeight: 'bold', color: '#1e293b' },
+  asistenteRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 10, gap: 14, borderBottomWidth: 1, borderBottomColor: '#f1f5f9' },
+  asistenteAvatar: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
+  asistenteNombre: { fontSize: 15, fontWeight: '500', color: '#1e293b' },
 });

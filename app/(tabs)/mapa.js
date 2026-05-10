@@ -1,9 +1,10 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import Slider from '@react-native-community/slider';
 import * as Location from 'expo-location';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ActivityIndicator, Animated, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Animated, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import { useConfig } from '../../contexts/ConfigContext';
 
@@ -17,6 +18,8 @@ import { notificationService } from '../../services/notificationService';
 
 // CACHÉ
 import { cacheService } from '../../services/cacheService';
+
+const norm = str => (str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 function calcularDistancia(lat1, lon1, lat2, lon2) {
   const R = 6371;
@@ -87,18 +90,16 @@ export default function PantallaMapa() {
           setListaDeFiestas(cachedFiestas);
         }
 
+        let fiestasDescargadas = [];
         try {
           const querySnapshot = await getDocs(collection(db, "fiestas"));
-          const fiestasDescargadas = [];
           querySnapshot.forEach((doc) => {
             fiestasDescargadas.push({ id: doc.id, ...doc.data() });
           });
-
           if (fiestasDescargadas.length > 0) {
             await cacheService.setCachedFiestas(fiestasDescargadas);
             setListaDeFiestas(fiestasDescargadas);
           }
-
         } catch (error) {
           console.warn("Error conectando con Firebase:", error);
         }
@@ -106,6 +107,26 @@ export default function PantallaMapa() {
         try {
           const favs = await favoritesService.getFavorites();
           setFavoritosIds(favs || []);
+
+          if (fiestasDescargadas.length > 0 && favs && favs.length > 0) {
+            const lastCheckStr = await AsyncStorage.getItem('@folixa_favs_lastcheck');
+            const lastCheck = lastCheckStr ? parseInt(lastCheckStr, 10) : 0;
+            if (lastCheck > 0) {
+              const actualizadas = fiestasDescargadas.filter(f => {
+                if (!favs.includes(f.id) || !f.lastUpdated) return false;
+                const ts = f.lastUpdated.seconds ? f.lastUpdated.seconds * 1000 : Number(f.lastUpdated);
+                return ts > lastCheck;
+              });
+              if (actualizadas.length > 0) {
+                const nombres = actualizadas.map(f => f.nombre).join(', ');
+                await notificationService.sendLocalNotification(
+                  '🎪 Fiestas favoritas actualizadas',
+                  `Han cambiado: ${nombres}`
+                );
+              }
+            }
+            await AsyncStorage.setItem('@folixa_favs_lastcheck', Date.now().toString());
+          }
         } catch (error) {
           console.warn("Error favs:", error);
         }
@@ -140,19 +161,15 @@ export default function PantallaMapa() {
 
     // 1. Filtro de búsqueda por nombre
     if (busqueda.trim() !== '') {
-      const nombre = fiesta.nombre.toLowerCase();
-      const busquedaLower = busqueda.toLowerCase();
-      if (!nombre.includes(busquedaLower)) return false;
+      if (!norm(fiesta.nombre).includes(norm(busqueda))) return false;
     }
 
     // 2. Filtro por orquesta
-    if (orquestaFiltro !== '') {
-      if (!fiesta.orquesta || fiesta.orquesta.toLowerCase() !== orquestaFiltro.toLowerCase()) {
-        return false;
-      }
+    if (orquestaFiltro.trim() !== '') {
+      if (!norm(fiesta.orquesta).includes(norm(orquestaFiltro))) return false;
     }
 
-    // Filtro Favoritos
+// Filtro Favoritos
     if (soloFavoritos) {
       if (!favoritosIds.includes(fiesta.id)) {
         return false;
@@ -313,7 +330,11 @@ export default function PantallaMapa() {
         animationType="slide"
         onRequestClose={() => setModalFiltrosVisible(false)}
       >
-        <View style={styles.modalFiltrosFondo}>
+        <KeyboardAvoidingView
+          style={styles.modalFiltrosFondo}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity style={{ flex: 1 }} activeOpacity={1} onPress={() => setModalFiltrosVisible(false)} />
           <View style={[styles.modalFiltrosContenido, isDark && styles.modalFiltrosContenidoDark]}>
             <View style={styles.modalHeader}>
               <Text style={[styles.modalTitulo, { color: isDark ? '#f1f1f1' : primaryColor }]}>
@@ -356,7 +377,7 @@ export default function PantallaMapa() {
               <Text style={[styles.textoCerrarFiltros, { color: textColor }]}>Cerrar</Text>
             </TouchableOpacity>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* BOTÓN BUSCAR EN ESTA ZONA (Al fondo) */}

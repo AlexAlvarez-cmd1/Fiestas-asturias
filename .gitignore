@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# Claves privadas de servicios externos
+config/keys.js
+
 # typescript
 *.tsbuildinfo
 

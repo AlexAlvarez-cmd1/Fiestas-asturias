@@ -1,5 +1,5 @@
-import { addDoc, collection, getDocs, orderBy, query, serverTimestamp } from 'firebase/firestore';
-import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { addDoc, collection, deleteDoc, doc, getDocs, orderBy, query, serverTimestamp } from 'firebase/firestore';
+import { deleteObject, getDownloadURL, ref, uploadBytes } from 'firebase/storage';
 import { db, storage } from '../firebaseConfig';
 
 export const fotosService = {
@@ -7,8 +7,8 @@ export const fotosService = {
     const response = await fetch(uri);
     const blob = await response.blob();
 
-    const fileName = `fotos/${fiestaId}/${uid}_${Date.now()}.jpg`;
-    const storageRef = ref(storage, fileName);
+    const storagePath = `fotos/${fiestaId}/${uid}_${Date.now()}.jpg`;
+    const storageRef = ref(storage, storagePath);
     await uploadBytes(storageRef, blob);
 
     const imageUrl = await getDownloadURL(storageRef);
@@ -17,6 +17,7 @@ export const fotosService = {
       uid,
       username,
       imageUrl,
+      storagePath,
       createdAt: serverTimestamp(),
     });
 
@@ -30,5 +31,16 @@ export const fotosService = {
     );
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  },
+
+  async deleteFoto(fiestaId, fotoId, storagePath) {
+    await deleteDoc(doc(db, 'fiestas', fiestaId, 'fotos', fotoId));
+    if (storagePath) {
+      try {
+        await deleteObject(ref(storage, storagePath));
+      } catch (e) {
+        console.warn('No se pudo borrar el archivo de Storage:', e);
+      }
+    }
   },
 };

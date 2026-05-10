@@ -1,15 +1,17 @@
 import { collection, getDocs } from 'firebase/firestore';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useCallback, useState } from 'react';
-import { useRouter } from 'expo-router';
+import { useCallback, useMemo, useState } from 'react';
 import {
-  ActivityIndicator, FlatList, RefreshControl, ScrollView, StyleSheet,
-  Text, TextInput, TouchableOpacity, View,
+  ActivityIndicator, FlatList, KeyboardAvoidingView, Modal, Platform, RefreshControl,
+  ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebaseConfig';
 import { cacheService } from '../../services/cacheService';
+import { favoritesService } from '../../services/favoritesService';
 import { useConfig } from '../../contexts/ConfigContext';
+
+const norm = str => (str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
 const DIAS_SEMANA = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
 const MESES = [
@@ -20,7 +22,6 @@ const MESES = [
 export default function PantallaLista() {
   const router = useRouter();
   const { primaryColor, emojiFiesta, theme, textColor } = useConfig();
-  const isDark = theme === 'dark';
   const isDark = theme === 'dark';
 
   const [fiestas, setFiestas] = useState([]);
@@ -33,6 +34,11 @@ export default function PantallaLista() {
     return { year: n.getFullYear(), month: n.getMonth() };
   });
   const [selectedDay, setSelectedDay] = useState(null);
+  const [filtroConcejo, setFiltroConcejo] = useState('');
+  const [filtroOrquesta, setFiltroOrquesta] = useState('');
+  const [soloFavoritos, setSoloFavoritos] = useState(false);
+  const [favoritosIds, setFavoritosIds] = useState([]);
+  const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
 
   const cargar = async (isRefresh = false) => {
     if (!isRefresh) {
@@ -60,11 +66,21 @@ export default function PantallaLista() {
   };
 
   useFocusEffect(
-    useCallback(() => { cargar(); }, [])
+    useCallback(() => {
+      cargar();
+      favoritesService.getFavorites().then(setFavoritosIds);
+    }, [])
   );
 
   const hoy = new Date();
   hoy.setHours(0, 0, 0, 0);
+
+  const concejos = useMemo(() => {
+    const set = new Set(fiestas.map(f => f.concejo).filter(Boolean));
+    return Array.from(set).sort();
+  }, [fiestas]);
+
+  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos].filter(Boolean).length;
 
   const fiestasFiltradas = fiestas
     .filter(f => {
@@ -72,10 +88,12 @@ export default function PantallaLista() {
       const fechaFiesta = new Date(f.fecha);
       fechaFiesta.setHours(0, 0, 0, 0);
       if (fechaFiesta < hoy) return false;
+      if (soloFavoritos && !favoritosIds.includes(f.id)) return false;
+      if (filtroConcejo && f.concejo !== filtroConcejo) return false;
+      if (filtroOrquesta.trim() && !norm(f.orquesta).includes(norm(filtroOrquesta))) return false;
       if (busqueda.trim() !== '') {
-        const q = busqueda.toLowerCase();
-        return (f.nombre || '').toLowerCase().includes(q) ||
-               (f.concejo || '').toLowerCase().includes(q);
+        const q = norm(busqueda);
+        return norm(f.nombre).includes(q) || norm(f.concejo).includes(q);
       }
       return true;
     })
@@ -325,13 +343,26 @@ export default function PantallaLista() {
         </View>
 
         {viewMode === 'lista' && (
-          <TextInput
-            style={styles.buscador}
-            placeholder="Buscar fiesta o concejo..."
-            placeholderTextColor="#888"
-            value={busqueda}
-            onChangeText={setBusqueda}
-          />
+          <View style={styles.buscadorRow}>
+            <TextInput
+              style={[styles.buscador, { flex: 1 }]}
+              placeholder="Buscar fiesta o concejo..."
+              placeholderTextColor="#888"
+              value={busqueda}
+              onChangeText={setBusqueda}
+            />
+            <TouchableOpacity
+              style={styles.btnFiltros}
+              onPress={() => setModalFiltrosVisible(true)}
+            >
+              <Text style={styles.btnFiltrosTxt}>⚙️</Text>
+              {filtrosActivos > 0 && (
+                <View style={styles.filtrosBadge}>
+                  <Text style={styles.filtrosBadgeTxt}>{filtrosActivos}</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -362,6 +393,78 @@ export default function PantallaLista() {
           {renderCalendario()}
         </View>
       )}
+      <Modal
+        visible={modalFiltrosVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setModalFiltrosVisible(false)}
+      >
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        >
+          <TouchableOpacity
+            style={[styles.modalFondo, { flex: 1 }]}
+            activeOpacity={1}
+            onPress={() => setModalFiltrosVisible(false)}
+          />
+          <View style={[styles.modalFiltros, isDark && styles.modalFiltrosDark]}>
+          <Text style={[styles.modalFiltrosTitulo, isDark && styles.textDark]}>Filtros</Text>
+
+          <View style={styles.filtroRow}>
+            <Text style={[styles.filtroLabel, isDark && styles.textDark]}>⭐ Solo favoritos</Text>
+            <Switch
+              value={soloFavoritos}
+              onValueChange={setSoloFavoritos}
+              trackColor={{ false: '#ddd', true: primaryColor }}
+            />
+          </View>
+
+          <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginBottom: 8 }]}>📍 Concejo</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsRow}>
+            <TouchableOpacity
+              style={[styles.chip, !filtroConcejo && { backgroundColor: primaryColor }]}
+              onPress={() => setFiltroConcejo('')}
+            >
+              <Text style={[styles.chipTxt, !filtroConcejo && { color: textColor }]}>Todos</Text>
+            </TouchableOpacity>
+            {concejos.map(c => (
+              <TouchableOpacity
+                key={c}
+                style={[styles.chip, filtroConcejo === c && { backgroundColor: primaryColor }]}
+                onPress={() => setFiltroConcejo(filtroConcejo === c ? '' : c)}
+              >
+                <Text style={[styles.chipTxt, filtroConcejo === c && { color: textColor }]}>{c}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🎵 Orquesta</Text>
+          <TextInput
+            style={[styles.filtroInput, isDark && styles.filtroInputDark]}
+            placeholder="Nombre de orquesta..."
+            placeholderTextColor="#888"
+            value={filtroOrquesta}
+            onChangeText={setFiltroOrquesta}
+          />
+
+          <View style={styles.filtrosBtns}>
+            <TouchableOpacity
+              style={[styles.btnLimpiar, isDark && styles.btnLimpiarDark]}
+              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); }}
+            >
+              <Text style={[styles.btnLimpiarTxt, isDark && styles.subTextDark]}>Limpiar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.btnAplicar, { backgroundColor: primaryColor }]}
+              onPress={() => setModalFiltrosVisible(false)}
+            >
+              <Text style={[styles.btnAplicarTxt, { color: textColor }]}>Aplicar</Text>
+            </TouchableOpacity>
+          </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -399,6 +502,7 @@ const styles = StyleSheet.create({
   },
   toggleTxt: { fontSize: 14 },
 
+  buscadorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   buscador: {
     backgroundColor: 'rgba(255,255,255,0.92)',
     borderRadius: 12,
@@ -407,6 +511,53 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#333',
   },
+  btnFiltros: {
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    width: 46, height: 46, borderRadius: 12,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  btnFiltrosTxt: { fontSize: 20 },
+  filtrosBadge: {
+    position: 'absolute', top: 4, right: 4,
+    backgroundColor: '#ef4444',
+    width: 16, height: 16, borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  filtrosBadgeTxt: { color: 'white', fontSize: 10, fontWeight: 'bold' },
+
+  modalFondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  modalFiltros: {
+    backgroundColor: 'white',
+    borderTopLeftRadius: 24, borderTopRightRadius: 24,
+    padding: 24, paddingBottom: 44,
+  },
+  modalFiltrosDark: { backgroundColor: '#1e1e1e' },
+  modalFiltrosTitulo: { fontSize: 20, fontWeight: 'bold', color: '#1e293b', marginBottom: 20 },
+  filtroRow: {
+    flexDirection: 'row', justifyContent: 'space-between',
+    alignItems: 'center', marginBottom: 20,
+  },
+  filtroLabel: { fontSize: 15, fontWeight: '600', color: '#334155' },
+  chipsRow: { marginBottom: 4 },
+  chip: {
+    backgroundColor: '#f1f5f9', paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 20, marginRight: 8,
+  },
+  chipTxt: { fontSize: 13, color: '#475569', fontWeight: '600' },
+  filtroInput: {
+    backgroundColor: '#f1f5f9', borderRadius: 12,
+    paddingHorizontal: 15, paddingVertical: 10, fontSize: 15, color: '#333',
+  },
+  filtroInputDark: { backgroundColor: '#2a2a2a', color: '#f1f1f1' },
+  filtrosBtns: { flexDirection: 'row', gap: 12, marginTop: 24 },
+  btnLimpiar: {
+    flex: 1, padding: 14, borderRadius: 12,
+    backgroundColor: '#f1f5f9', alignItems: 'center',
+  },
+  btnLimpiarDark: { backgroundColor: '#2a2a2a' },
+  btnLimpiarTxt: { fontWeight: '600', color: '#475569' },
+  btnAplicar: { flex: 1, padding: 14, borderRadius: 12, alignItems: 'center' },
+  btnAplicarTxt: { fontWeight: 'bold', fontSize: 15 },
 
   // List
   lista: { padding: 15, gap: 12 },

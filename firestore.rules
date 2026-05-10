@@ -1,0 +1,130 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ── Helpers ────────────────────────────────────────────────────────────
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    // Valida que los campos de una fiesta tienen longitud razonable
+    // y no contienen datos inesperados
+    function fiestaValida(data) {
+      return data.nombre is string && data.nombre.size() <= 200
+          && data.concejo is string && data.concejo.size() <= 100
+          && data.fecha is string && data.fecha.size() == 10
+          && (!('orquesta' in data) || data.orquesta.size() <= 200)
+          && (!('linkVersity' in data) || data.linkVersity.size() <= 500);
+    }
+
+    // Valida que los campos de perfil de usuario son seguros
+    function perfilValido(data) {
+      return (!('username' in data) || (data.username is string && data.username.size() <= 50))
+          && (!('bio' in data) || (data.bio is string && data.bio.size() <= 300))
+          && (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100));
+    }
+
+    // Lee el documento del usuario en Firestore para verificar isAdmin.
+    // Usar get() aquí garantiza que la comprobación es SERVER-SIDE,
+    // no puede ser manipulada desde el cliente.
+    function isAdmin() {
+      return isSignedIn() &&
+        get(/databases/$(database)/documents/users/$(request.auth.uid))
+          .data.get('isAdmin', 'false') == 'true';
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // ── Fiestas ────────────────────────────────────────────────────────────
+    match /fiestas/{fiestaId} {
+
+      // Cualquier usuario autenticado puede leer fiestas
+      allow read: if isSignedIn();
+
+      // Solo admins pueden crear o eliminar fiestas, y los datos deben ser válidos
+      allow create: if isAdmin() && fiestaValida(request.resource.data);
+      allow delete: if isAdmin();
+
+      // Update tiene dos niveles:
+      //   1. Admins pueden actualizar cualquier campo
+      //   2. Usuarios autenticados SOLO pueden tocar 'vistas' y 'asistentes'
+      //      (contador de visitas y asistencia). Nada más.
+      allow update: if (isAdmin() && fiestaValida(request.resource.data)) || (
+        isSignedIn() &&
+        request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasOnly(['vistas', 'asistentes'])
+      );
+
+      // ── Fotos (subcolección de cada fiesta) ──────────────────────────────
+      match /fotos/{fotoId} {
+        allow read: if isSignedIn();
+
+        // Solo puede crear fotos el propio usuario (uid debe coincidir)
+        allow create: if isSignedIn() &&
+                         request.resource.data.uid == request.auth.uid;
+
+        // Solo el autor o un admin pueden borrar una foto
+        allow delete: if isSignedIn() &&
+                         (resource.data.uid == request.auth.uid || isAdmin());
+
+        // Las fotos no se pueden editar una vez subidas
+        allow update: if false;
+      }
+    }
+
+    // ── Usuarios ───────────────────────────────────────────────────────────
+    match /users/{userId} {
+
+      // Los perfiles son visibles para cualquier usuario autenticado
+      // (necesario para buscar amigos y ver perfiles)
+      allow read: if isSignedIn();
+
+      // Un usuario solo puede crear su propio documento (al registrarse)
+      allow create: if isOwner(userId);
+
+      // Un usuario puede actualizar su propio perfil EXCEPTO el campo isAdmin.
+      // Solo un admin puede cambiar isAdmin (para dar/quitar permisos).
+      allow update: if isAdmin() || (
+        isOwner(userId) &&
+        perfilValido(request.resource.data) &&
+        !request.resource.data.diff(resource.data)
+          .affectedKeys()
+          .hasAny(['isAdmin'])
+      );
+
+      // Nadie puede eliminar perfiles de usuario
+      allow delete: if false;
+    }
+
+    // ── Friendships ────────────────────────────────────────────────────────
+    match /friendships/{friendshipId} {
+
+      // Solo pueden leer la amistad los dos usuarios implicados
+      allow read: if isSignedIn() &&
+                     request.auth.uid in resource.data.users;
+
+      // Solo puede crear la solicitud el usuario que la envía,
+      // y debe estar incluido en el array 'users'
+      allow create: if isSignedIn() &&
+                       request.resource.data.requestedBy == request.auth.uid &&
+                       request.auth.uid in request.resource.data.users;
+
+      // Cualquiera de los dos puede aceptar, rechazar o eliminar la amistad
+      allow update: if isSignedIn() &&
+                       request.auth.uid in resource.data.users;
+
+      allow delete: if isSignedIn() &&
+                       request.auth.uid in resource.data.users;
+    }
+
+    // ── Denegación por defecto ─────────────────────────────────────────────
+    // Cualquier colección no listada explícitamente queda completamente bloqueada
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

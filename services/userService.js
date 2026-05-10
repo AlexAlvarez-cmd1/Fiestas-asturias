@@ -101,4 +101,23 @@ export const userService = {
     );
     return enriched;
   },
+
+  async getAsistentes(fiestaId) {
+    try {
+      const q = query(
+        collection(db, 'users'),
+        where('asistencias', 'array-contains', fiestaId),
+        limit(50)
+      );
+      const snap = await getDocs(q);
+      return snap.docs.map(d => ({
+        uid: d.id,
+        username: d.data().username,
+        photoURL: d.data().photoURL,
+      }));
+    } catch (e) {
+      console.warn('Error cargando asistentes:', e);
+      return [];
+    }
+  },
 };

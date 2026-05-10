@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { useEffect, useRef, useState } from 'react';
 import 'react-native-gesture-handler';
@@ -12,7 +13,14 @@ function AuthGuard({ children }) {
   const { user, loading } = useAuth();
   const segments = useSegments();
   const router = useRouter();
-  const [requiresReauth, setRequiresReauth] = useState(null); // null = checking
+  const [requiresReauth, setRequiresReauth] = useState(null);
+  const [onboardingDone, setOnboardingDone] = useState(null); // null = checking
+
+  useEffect(() => {
+    AsyncStorage.getItem('@folixa_onboarding_done').then(val => {
+      setOnboardingDone(val === 'true');
+    });
+  }, []);
 
   // Check if biometric re-auth is needed when user session is restored
   useEffect(() => {
@@ -29,17 +37,18 @@ function AuthGuard({ children }) {
     });
   }, [user, loading]);
 
-  // Redirect unauthenticated users
+  // Redirect unauthenticated users (respeta onboarding)
   useEffect(() => {
-    if (loading) return;
-    if (requiresReauth === null && user) return; // Still checking
+    if (loading || onboardingDone === null) return;
+    if (requiresReauth === null && user) return;
     const inAuthGroup = segments[0] === 'auth';
-    if (!user && !inAuthGroup) {
-      router.replace('/auth/login');
-    } else if (user && inAuthGroup) {
+    const inOnboarding = segments[0] === 'onboarding';
+    if (!user && !inAuthGroup && !inOnboarding) {
+      router.replace(onboardingDone ? '/auth/login' : '/onboarding');
+    } else if (user && (inAuthGroup || inOnboarding)) {
       router.replace('/(tabs)');
     }
-  }, [user, loading, segments, requiresReauth]);
+  }, [user, loading, segments, requiresReauth, onboardingDone]);
 
   // Show biometric lock as overlay over the navigation
   return (
@@ -100,6 +109,8 @@ export default function RootLayout() {
               <Stack.Screen name="nueva" options={{ title: 'Añadir Fiesta', animation: 'slide_from_bottom' }} />
               <Stack.Screen name="editar" options={{ title: 'Editar Fiesta', animation: 'slide_from_right' }} />
               <Stack.Screen name="orquestas" options={{ title: 'Orquestas', animation: 'slide_from_right', headerShown: false }} />
+              <Stack.Screen name="onboarding" options={{ headerShown: false }} />
+              <Stack.Screen name="admin/index" options={{ headerShown: false }} />
             </Stack>
           </AuthGuard>
         </ConfigProvider>

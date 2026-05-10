@@ -3,17 +3,26 @@ import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { Stack, useRouter } from 'expo-router';
 import { addDoc, collection, GeoPoint } from 'firebase/firestore';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ActivityIndicator, Alert, Image, Platform, ScrollView, StyleSheet, Switch, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Marker } from 'react-native-maps';
-import { db } from '../firebaseConfig';
-
-// Pega tu API Key de ImgBB entre las comillas
-const IMGBB_API_KEY = "9b4357ae333c6076d71703a13108b4b4";
+import { getDownloadURL, ref, uploadBytes } from 'firebase/storage';
+import { useAuth } from '../contexts/AuthContext';
+import { db, storage } from '../firebaseConfig';
 
 export default function PantallaAñadir() {
   const router = useRouter();
+  const { userProfile } = useAuth();
   const [cargando, setCargando] = useState(false);
+
+  useEffect(() => {
+    if (!userProfile) return;
+    const esAdmin = userProfile.isAdmin === true || userProfile.isAdmin === 'true';
+    if (!esAdmin) {
+      Alert.alert('Acceso denegado', 'Solo los administradores pueden añadir fiestas.');
+      router.replace('/(tabs)');
+    }
+  }, [userProfile]);
 
   // Estados del formulario general
   const [nombre, setNombre] = useState('');
@@ -25,14 +34,13 @@ export default function PantallaAñadir() {
   const [esVersity, setEsVersity] = useState(false);
   const [linkVersity, setLinkVersity] = useState('');
 
-  // Guardamos la imagen y su versión en texto (base64) para ImgBB
   const [imagenUri, setImagenUri] = useState(null);
-  const [imagenBase64, setImagenBase64] = useState(null);
 
   const [lat, setLat] = useState(43.3614);
   const [lon, setLon] = useState(-5.8593);
   const [ubicacionSeleccionada, setUbicacionSeleccionada] = useState(null);
   const [mostrarPicker, setMostrarPicker] = useState(false);
+  const [errores, setErrores] = useState({});
 
   const [regionInicial, setRegionInicial] = useState({
     latitude: 43.3614, longitude: -5.8593, latitudeDelta: 0.5, longitudeDelta: 0.5,
@@ -49,14 +57,12 @@ export default function PantallaAñadir() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       allowsEditing: true,
-      aspect: [3, 4], 
-      quality: 0.4, 
-      base64: true, 
+      aspect: [3, 4],
+      quality: 0.6,
     });
 
     if (!result.canceled) {
       setImagenUri(result.assets[0].uri);
-      setImagenBase64(result.assets[0].base64); 
     }
   };
 
@@ -77,33 +83,32 @@ export default function PantallaAñadir() {
     setCargando(false);
   };
 
-  // 2. SUBIR A IMGBB Y GUARDAR EN FIREBASE FIRESTORE
+  const validar = () => {
+    const e = {};
+    if (!nombre.trim() || nombre.trim().length < 3) e.nombre = 'El nombre es obligatorio (mín. 3 caracteres)';
+    if (!concejo.trim()) e.concejo = 'El concejo es obligatorio';
+    if (!ubicacionSeleccionada) e.ubicacion = 'Toca el mapa para seleccionar la ubicación';
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    if (fecha < hoy) e.fecha = 'La fecha debe ser hoy o en el futuro';
+    if (esVersity && !linkVersity.trim()) e.linkVersity = 'Añade el enlace de Versity';
+    setErrores(e);
+    return Object.keys(e).length === 0;
+  };
+
+  // 2. SUBIR IMAGEN A FIREBASE STORAGE Y GUARDAR EN FIRESTORE
   const guardarFiesta = async () => {
-    if (!nombre || !concejo || !ubicacionSeleccionada || !fecha) {
-      Alert.alert("Faltan datos", "Por favor, rellena los campos y selecciona la ubicación en el mapa.");
-      return;
-    }
+    if (!validar()) return;
 
     setCargando(true);
     let urlImagenFinal = "https://images.unsplash.com/photo-1533174000228-403285040149?q=80&w=600";
 
     try {
-      if (imagenBase64) {
-        const formData = new FormData();
-        formData.append('image', imagenBase64);
-
-        const respuestaImgbb = await fetch(`https://api.imgbb.com/1/upload?key=${IMGBB_API_KEY}`, {
-          method: 'POST',
-          body: formData,
-        });
-
-        const datosImgbb = await respuestaImgbb.json();
-        
-        if (datosImgbb.success) {
-           urlImagenFinal = datosImgbb.data.url; 
-        } else {
-           Alert.alert("Error de imagen", "No se pudo subir la foto, pero guardaremos la fiesta sin ella.");
-        }
+      if (imagenUri) {
+        const response = await fetch(imagenUri);
+        const blob = await response.blob();
+        const storageRef = ref(storage, `carteles/${Date.now()}.jpg`);
+        await uploadBytes(storageRef, blob);
+        urlImagenFinal = await getDownloadURL(storageRef);
       }
 
       // Guardamos en Firebase (INCLUYENDO VERSITY)
@@ -132,19 +137,33 @@ export default function PantallaAñadir() {
       <Stack.Screen options={{ title: "Nueva Fiesta de Prao" }} />
       
       <View style={styles.formulario}>
-        <Text style={styles.label}>Nombre de la Folixa</Text>
-        <TextInput style={styles.input} value={nombre} onChangeText={setNombre} placeholder="Ej: El Xiringüelu" />
+        <Text style={styles.label}>Nombre de la Folixa <Text style={styles.req}>*</Text></Text>
+        <TextInput
+          style={[styles.input, errores.nombre && styles.inputError]}
+          value={nombre} onChangeText={t => { setNombre(t); setErrores(e => ({ ...e, nombre: null })); }}
+          placeholder="Ej: El Xiringüelu"
+        />
+        {errores.nombre && <Text style={styles.errorTxt}>{errores.nombre}</Text>}
 
-        <Text style={styles.label}>Concejo</Text>
-        <TextInput style={styles.input} value={concejo} onChangeText={setConcejo} placeholder="Ej: Pravia" />
+        <Text style={styles.label}>Concejo <Text style={styles.req}>*</Text></Text>
+        <TextInput
+          style={[styles.input, errores.concejo && styles.inputError]}
+          value={concejo} onChangeText={t => { setConcejo(t); setErrores(e => ({ ...e, concejo: null })); }}
+          placeholder="Ej: Pravia"
+        />
+        {errores.concejo && <Text style={styles.errorTxt}>{errores.concejo}</Text>}
 
         <Text style={styles.label}>Orquesta / Música</Text>
         <TextInput style={styles.input} value={orquesta} onChangeText={setOrquesta} placeholder="Ej: Panorama, Tekila..." />
 
-        <Text style={styles.label}>Fecha</Text>
-        <TouchableOpacity style={styles.input} onPress={() => setMostrarPicker(true)}>
+        <Text style={styles.label}>Fecha <Text style={styles.req}>*</Text></Text>
+        <TouchableOpacity
+          style={[styles.input, errores.fecha && styles.inputError]}
+          onPress={() => setMostrarPicker(true)}
+        >
           <Text>{fecha.toLocaleDateString('es-ES')}</Text>
         </TouchableOpacity>
+        {errores.fecha && <Text style={styles.errorTxt}>{errores.fecha}</Text>}
 
         {mostrarPicker && (
           <DateTimePicker value={fecha} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(event, date) => { setMostrarPicker(false); if (date) setFecha(date); }} />
@@ -163,18 +182,21 @@ export default function PantallaAñadir() {
           </View>
           
           {esVersity && (
-            <TextInput 
-              style={[styles.input, { marginTop: 10 }]} 
-              value={linkVersity} 
-              onChangeText={setLinkVersity} 
-              placeholder="Pega aquí el enlace de compra" 
-              autoCapitalize="none"
-              keyboardType="url"
-            />
+            <>
+              <TextInput
+                style={[styles.input, { marginTop: 10 }, errores.linkVersity && styles.inputError]}
+                value={linkVersity}
+                onChangeText={t => { setLinkVersity(t); setErrores(e => ({ ...e, linkVersity: null })); }}
+                placeholder="Pega aquí el enlace de compra"
+                autoCapitalize="none"
+                keyboardType="url"
+              />
+              {errores.linkVersity && <Text style={styles.errorTxt}>{errores.linkVersity}</Text>}
+            </>
           )}
         </View>
 
-        <Text style={styles.label}>Cartel del Prao</Text>
+        <Text style={styles.label}>Cartel de la fiesta</Text>
         <TouchableOpacity style={styles.btnGaleria} onPress={seleccionarImagen}>
           <Text style={styles.btnTextoGaleria}>📁 Seleccionar imagen de la galería</Text>
         </TouchableOpacity>
@@ -183,7 +205,8 @@ export default function PantallaAñadir() {
           <Image source={{ uri: imagenUri }} style={styles.cartelPrevia} />
         )}
 
-        <Text style={styles.label}>Selecciona ubicación en el mapa 📍</Text>
+        <Text style={styles.label}>Selecciona ubicación en el mapa 📍 <Text style={styles.req}>*</Text></Text>
+        {errores.ubicacion && <Text style={styles.errorTxt}>{errores.ubicacion}</Text>}
         <View style={styles.contenedorMapa}>
           <MapView
             style={styles.mapa} initialRegion={regionInicial}
@@ -216,7 +239,10 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#f4f4f4' },
   formulario: { padding: 20 },
   label: { fontWeight: 'bold', color: '#166534', marginBottom: 5, marginTop: 15 },
+  req: { color: '#ef4444' },
   input: { backgroundColor: 'white', padding: 15, borderRadius: 10, borderWidth: 1, borderColor: '#ddd' },
+  inputError: { borderColor: '#ef4444', borderWidth: 1.5 },
+  errorTxt: { color: '#ef4444', fontSize: 12, marginTop: 4, marginLeft: 4 },
   
   // Estilos de Versity
   seccionVersity: { backgroundColor: '#ffedd5', padding: 15, borderRadius: 10, marginTop: 20, borderWidth: 1, borderColor: '#fdba74' },
