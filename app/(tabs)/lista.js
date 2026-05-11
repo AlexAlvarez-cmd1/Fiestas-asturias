@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { collection, getDocs } from 'firebase/firestore';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
@@ -9,7 +10,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { db } from '../../firebaseConfig';
 import { cacheService } from '../../services/cacheService';
 import { favoritesService } from '../../services/favoritesService';
+import { userService } from '../../services/userService';
 import { useConfig } from '../../contexts/ConfigContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 const norm = str => (str || '').normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
 
@@ -22,6 +25,7 @@ const MESES = [
 export default function PantallaLista() {
   const router = useRouter();
   const { primaryColor, emojiFiesta, theme, textColor } = useConfig();
+  const { user } = useAuth();
   const isDark = theme === 'dark';
 
   const [fiestas, setFiestas] = useState([]);
@@ -39,6 +43,9 @@ export default function PantallaLista() {
   const [soloFavoritos, setSoloFavoritos] = useState(false);
   const [favoritosIds, setFavoritosIds] = useState([]);
   const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
+  const [amigosEnFiestas, setAmigosEnFiestas] = useState({});
+  const [misAsistencias, setMisAsistencias] = useState([]);
+  const [filtroSemana, setFiltroSemana] = useState(null); // null | 'esta' | 'proxima'
 
   const cargar = async (isRefresh = false) => {
     if (!isRefresh) {
@@ -69,7 +76,21 @@ export default function PantallaLista() {
     useCallback(() => {
       cargar();
       favoritesService.getFavorites().then(setFavoritosIds);
-    }, [])
+      AsyncStorage.getItem('@folixa_mis_asistencias').then(s => {
+        setMisAsistencias(s ? JSON.parse(s) : []);
+      }).catch(() => {});
+      if (user) {
+        userService.getFriends(user.uid).then(amigos => {
+          const contador = {};
+          amigos.forEach(a => {
+            (a.asistencias || []).forEach(fid => {
+              contador[fid] = (contador[fid] || 0) + 1;
+            });
+          });
+          setAmigosEnFiestas(contador);
+        }).catch(() => {});
+      }
+    }, [user])
   );
 
   const hoy = new Date();
@@ -80,7 +101,7 @@ export default function PantallaLista() {
     return Array.from(set).sort();
   }, [fiestas]);
 
-  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos].filter(Boolean).length;
+  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos, filtroSemana].filter(Boolean).length;
 
   const fiestasFiltradas = fiestas
     .filter(f => {
@@ -91,6 +112,18 @@ export default function PantallaLista() {
       if (soloFavoritos && !favoritosIds.includes(f.id)) return false;
       if (filtroConcejo && f.concejo !== filtroConcejo) return false;
       if (filtroOrquesta.trim() && !norm(f.orquesta).includes(norm(filtroOrquesta))) return false;
+      if (filtroSemana) {
+        const fin = new Date(hoy);
+        if (filtroSemana === 'esta') {
+          fin.setDate(hoy.getDate() + 6);
+          if (fechaFiesta > fin) return false;
+        } else if (filtroSemana === 'proxima') {
+          const inicio = new Date(hoy);
+          inicio.setDate(hoy.getDate() + 7);
+          fin.setDate(hoy.getDate() + 13);
+          if (fechaFiesta < inicio || fechaFiesta > fin) return false;
+        }
+      }
       if (busqueda.trim() !== '') {
         const q = norm(busqueda);
         return norm(f.nombre).includes(q) || norm(f.concejo).includes(q);
@@ -175,6 +208,20 @@ export default function PantallaLista() {
                 🎵 {fiesta.orquesta}
               </Text>
             ) : null}
+            <View style={styles.badgesRow}>
+              {misAsistencias.includes(fiesta.id) && (
+                <View style={styles.badgeVas}>
+                  <Text style={styles.badgeVasTxt}>✅ Vas</Text>
+                </View>
+              )}
+              {amigosEnFiestas[fiesta.id] > 0 && (
+                <View style={styles.badgeAmigos}>
+                  <Text style={styles.badgeAmigosTxt}>
+                    👥 {amigosEnFiestas[fiesta.id]} {amigosEnFiestas[fiesta.id] === 1 ? 'amigo va' : 'amigos van'}
+                  </Text>
+                </View>
+              )}
+            </View>
           </View>
           <Text style={[styles.flecha, isDark && styles.subTextDark]}>›</Text>
         </View>
@@ -343,26 +390,51 @@ export default function PantallaLista() {
         </View>
 
         {viewMode === 'lista' && (
-          <View style={styles.buscadorRow}>
-            <TextInput
-              style={[styles.buscador, { flex: 1 }]}
-              placeholder="Buscar fiesta o concejo..."
-              placeholderTextColor="#888"
-              value={busqueda}
-              onChangeText={setBusqueda}
-            />
-            <TouchableOpacity
-              style={styles.btnFiltros}
-              onPress={() => setModalFiltrosVisible(true)}
-            >
-              <Text style={styles.btnFiltrosTxt}>⚙️</Text>
-              {filtrosActivos > 0 && (
-                <View style={styles.filtrosBadge}>
-                  <Text style={styles.filtrosBadgeTxt}>{filtrosActivos}</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          </View>
+          <>
+            <View style={styles.buscadorRow}>
+              <TextInput
+                style={[styles.buscador, { flex: 1 }]}
+                placeholder="Buscar fiesta o concejo..."
+                placeholderTextColor="#888"
+                value={busqueda}
+                onChangeText={setBusqueda}
+              />
+              <TouchableOpacity
+                style={styles.btnFiltros}
+                onPress={() => setModalFiltrosVisible(true)}
+              >
+                <Text style={styles.btnFiltrosTxt}>⚙️</Text>
+                {filtrosActivos > 0 && (
+                  <View style={styles.filtrosBadge}>
+                    <Text style={styles.filtrosBadgeTxt}>{filtrosActivos}</Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+            <View style={styles.quickFiltersRow}>
+              {[
+                { key: 'esta', label: '📅 Esta semana' },
+                { key: 'proxima', label: '📅 Próx. semana' },
+              ].map(({ key, label }) => (
+                <TouchableOpacity
+                  key={key}
+                  style={[
+                    styles.quickChip,
+                    filtroSemana === key && { backgroundColor: 'rgba(255,255,255,0.9)' },
+                  ]}
+                  onPress={() => setFiltroSemana(filtroSemana === key ? null : key)}
+                >
+                  <Text style={[
+                    styles.quickChipTxt,
+                    { color: filtroSemana === key ? primaryColor : 'rgba(255,255,255,0.85)' },
+                    filtroSemana === key && { fontWeight: 'bold' },
+                  ]}>
+                    {label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </>
         )}
       </View>
 
@@ -451,7 +523,7 @@ export default function PantallaLista() {
           <View style={styles.filtrosBtns}>
             <TouchableOpacity
               style={[styles.btnLimpiar, isDark && styles.btnLimpiarDark]}
-              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); }}
+              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); setFiltroSemana(null); }}
             >
               <Text style={[styles.btnLimpiarTxt, isDark && styles.subTextDark]}>Limpiar</Text>
             </TouchableOpacity>
@@ -501,6 +573,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   toggleTxt: { fontSize: 14 },
+
+  quickFiltersRow: { flexDirection: 'row', gap: 8, marginTop: 8 },
+  quickChip: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  quickChipTxt: { fontSize: 13, fontWeight: '500' },
 
   buscadorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   buscador: {
@@ -583,6 +662,19 @@ const styles = StyleSheet.create({
   orquesta: { color: '#64748b', fontSize: 13, marginTop: 2 },
   subTextDark: { color: '#aaa' },
   flecha: { fontSize: 28, color: '#cbd5e1', fontWeight: '300' },
+  badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 5 },
+  badgeVas: {
+    backgroundColor: '#dcfce7', borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: '#22c55e',
+  },
+  badgeVasTxt: { fontSize: 12, fontWeight: '700', color: '#15803d' },
+  badgeAmigos: {
+    backgroundColor: '#fef3c7', borderRadius: 10,
+    paddingHorizontal: 8, paddingVertical: 3,
+    borderWidth: 1, borderColor: '#f59e0b',
+  },
+  badgeAmigosTxt: { fontSize: 12, fontWeight: '700', color: '#92400e' },
 
   // Calendar wrapper
   calendarWrapper: { flex: 1, paddingHorizontal: 12, paddingTop: 10 },

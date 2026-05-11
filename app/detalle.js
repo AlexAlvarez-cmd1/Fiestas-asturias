@@ -209,8 +209,7 @@ export default function PantallaDetalle() {
 
   const toggleAttendance = async () => {
     if (loadingAttendance) return;
-    
-    // Optimistic UI update
+
     const newStatus = !hasAttended;
     setHasAttended(newStatus);
     setAsistentesCount(prev => newStatus ? prev + 1 : Math.max(0, prev - 1));
@@ -221,15 +220,38 @@ export default function PantallaDetalle() {
         await storageService.setItem(`attended_${id}`, 'true');
         await updateDoc(fiestaRef, { asistentes: increment(1) });
         if (user) await userService.updateAsistencia(user.uid, id, true);
+        try {
+          const notifIds = await notificationService.scheduleAllRemindersForFiesta?.({ id, nombre, fecha, concejo });
+          if (notifIds?.length) await storageService.setItem(`reminder_attended_${id}`, JSON.stringify(notifIds));
+        } catch (e) {}
+        try {
+          const listStr = await storageService.getItem('@folixa_mis_asistencias');
+          const lista = listStr ? JSON.parse(listStr) : [];
+          if (!lista.includes(id)) lista.push(id);
+          await storageService.setItem('@folixa_mis_asistencias', JSON.stringify(lista));
+        } catch (e) {}
       } else {
         await storageService.removeItem(`attended_${id}`);
         await updateDoc(fiestaRef, { asistentes: increment(-1) });
         if (user) await userService.updateAsistencia(user.uid, id, false);
+        try {
+          const stored = await storageService.getItem(`reminder_attended_${id}`);
+          if (stored) {
+            await notificationService.cancelAllRemindersForFiesta?.(JSON.parse(stored));
+            await storageService.removeItem(`reminder_attended_${id}`);
+          }
+        } catch (e) {}
+        try {
+          const listStr = await storageService.getItem('@folixa_mis_asistencias');
+          const lista = listStr ? JSON.parse(listStr) : [];
+          const idx = lista.indexOf(id);
+          if (idx !== -1) lista.splice(idx, 1);
+          await storageService.setItem('@folixa_mis_asistencias', JSON.stringify(lista));
+        } catch (e) {}
       }
     } catch (error) {
       console.error("Error updating attendance:", error);
       Alert.alert("Error", "No se pudo actualizar tu asistencia.");
-      // Revert optimistic update
       setHasAttended(!newStatus);
       setAsistentesCount(prev => !newStatus ? prev + 1 : Math.max(0, prev - 1));
     }
@@ -498,6 +520,11 @@ export default function PantallaDetalle() {
                     <View style={styles.fotoItem}>
                       <TouchableOpacity onPress={() => setFotoModal(item)} style={{ flex: 1 }}>
                         <Image source={{ uri: item.imageUrl }} style={styles.fotoThumb} />
+                        <View style={styles.fotoUploaderOverlay}>
+                          <Text style={styles.fotoUploaderTxt} numberOfLines={1}>
+                            {item.username || '?'}
+                          </Text>
+                        </View>
                       </TouchableOpacity>
                       {puedeEliminar && (
                         <TouchableOpacity
@@ -664,6 +691,12 @@ const styles = StyleSheet.create({
   galeriaVaciaTxt: { color: '#94a3b8', fontSize: 15, textAlign: 'center' },
   fotoItem: { flex: 1/3, aspectRatio: 1, padding: 1.5 },
   fotoThumb: { flex: 1, borderRadius: 4 },
+  fotoUploaderOverlay: {
+    position: 'absolute', bottom: 0, left: 0, right: 0,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 4, paddingVertical: 3,
+  },
+  fotoUploaderTxt: { color: 'white', fontSize: 9, fontWeight: '600' },
   btnBorrarFoto: {
     position: 'absolute', top: 4, right: 4,
     backgroundColor: 'rgba(0,0,0,0.6)',

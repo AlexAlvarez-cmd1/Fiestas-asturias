@@ -7,11 +7,13 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, KeyboardAvoidingView, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import MapView, { Circle, Marker } from 'react-native-maps';
 import { useConfig } from '../../contexts/ConfigContext';
+import { useAuth } from '../../contexts/AuthContext';
 
 // FIREBASE
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { favoritesService } from '../../services/favoritesService';
+import { userService } from '../../services/userService';
 
 // NOTIFICACIONES
 import { notificationService } from '../../services/notificationService';
@@ -33,6 +35,7 @@ export default function PantallaMapa() {
   const router = useRouter();
   const mapRef = useRef(null);
   const { emojiFiesta, primaryColor, theme, textColor } = useConfig();
+  const { user } = useAuth();
   const isDark = theme === 'dark';
   const pulseAnim = useRef(new Animated.Value(1)).current;
 
@@ -64,6 +67,9 @@ export default function PantallaMapa() {
   const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
   const [soloFavoritos, setSoloFavoritos] = useState(false);
   const [favoritosIds, setFavoritosIds] = useState([]);
+  const [amigosEnFiestas, setAmigosEnFiestas] = useState({});
+  const [misAsistencias, setMisAsistencias] = useState([]);
+  const [filtroSemana, setFiltroSemana] = useState(null); // null | 'esta' | 'proxima'
 
   useFocusEffect(
     useCallback(() => {
@@ -131,6 +137,26 @@ export default function PantallaMapa() {
           console.warn("Error favs:", error);
         }
 
+        try {
+          if (user) {
+            const amigos = await userService.getFriends(user.uid);
+            const contador = {};
+            amigos.forEach(a => {
+              (a.asistencias || []).forEach(fid => {
+                contador[fid] = (contador[fid] || 0) + 1;
+              });
+            });
+            setAmigosEnFiestas(contador);
+          }
+        } catch (error) {
+          console.warn("Error amigos:", error);
+        }
+
+        try {
+          const listStr = await AsyncStorage.getItem('@folixa_mis_asistencias');
+          setMisAsistencias(listStr ? JSON.parse(listStr) : []);
+        } catch (e) {}
+
         setCargando(false);
       };
       inicializarApp();
@@ -180,24 +206,33 @@ export default function PantallaMapa() {
     const dist = calcularDistancia(centroFiltro.lat, centroFiltro.lon, fiesta.ubicacion.latitude, fiesta.ubicacion.longitude);
     if (dist > radioKm) return false;
 
-    // 4. Filtro de fechas (Normalizamos a medianoche para que sea inclusivo)
+    // 4. Filtro de fechas
     const fFiesta = new Date(fiesta.fecha);
     fFiesta.setHours(0,0,0,0);
-
     const hoy = new Date();
     hoy.setHours(0,0,0,0);
 
-    // Fecha de inicio (si no hay, usamos hoy)
-    const inicio = fechaInicio ? new Date(fechaInicio) : hoy;
-    inicio.setHours(0,0,0,0);
-
-    if (fechaFin) {
-      const fin = new Date(fechaFin);
-      fin.setHours(23,59,59,999); // Fin del día para incluir el último día elegido
-      return fFiesta >= inicio && fFiesta <= fin;
+    if (filtroSemana) {
+      if (filtroSemana === 'esta') {
+        const fin = new Date(hoy);
+        fin.setDate(hoy.getDate() + 6);
+        return fFiesta >= hoy && fFiesta <= fin;
+      } else {
+        const inicio = new Date(hoy);
+        inicio.setDate(hoy.getDate() + 7);
+        const fin = new Date(hoy);
+        fin.setDate(hoy.getDate() + 13);
+        return fFiesta >= inicio && fFiesta <= fin;
+      }
     }
 
-    // Si no hay fecha de fin, mostramos todo lo que sea hoy o futuro respecto al inicio
+    const inicio = fechaInicio ? new Date(fechaInicio) : hoy;
+    inicio.setHours(0,0,0,0);
+    if (fechaFin) {
+      const fin = new Date(fechaFin);
+      fin.setHours(23,59,59,999);
+      return fFiesta >= inicio && fFiesta <= fin;
+    }
     return fFiesta >= inicio;
   });
 
@@ -259,8 +294,23 @@ export default function PantallaMapa() {
               });
             }}
           >
-            <View style={[styles.marcador, { borderColor: primaryColor }]} pointerEvents="none">
-              <Text style={{ fontSize: 22 }}>{emojiFiesta}</Text>
+            <View style={[
+              styles.marcador,
+              amigosEnFiestas[fiesta.id] > 0 && styles.marcadorAmigos,
+              misAsistencias.includes(fiesta.id) && styles.marcadorVas,
+              { borderColor: misAsistencias.includes(fiesta.id) ? '#22c55e' : primaryColor },
+            ]} pointerEvents="none">
+              <Text style={{ fontSize: amigosEnFiestas[fiesta.id] > 0 ? 28 : 22 }}>{emojiFiesta}</Text>
+              {misAsistencias.includes(fiesta.id) && (
+                <View style={styles.badgeVas}>
+                  <Text style={styles.badgeVasTxt}>✓</Text>
+                </View>
+              )}
+              {!misAsistencias.includes(fiesta.id) && amigosEnFiestas[fiesta.id] > 0 && (
+                <View style={styles.badgeAmigos}>
+                  <Text style={styles.badgeAmigosTxt}>👥{amigosEnFiestas[fiesta.id]}</Text>
+                </View>
+              )}
             </View>
           </Marker>
         ))}
@@ -290,21 +340,40 @@ export default function PantallaMapa() {
           onValueChange={setRadioKm} minimumTrackTintColor="#F59E0B" thumbTintColor="#F59E0B"
         />
 
-        <View style={styles.rowFechas}>
-          <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'inicio' && styles.btnActivo]} onPress={() => setModoPicker('inicio')}>
-            <Text style={styles.lblFecha}>DESDE</Text>
-            <Text style={[styles.valFecha, { color: textColor }]}>{fechaInicio ? fechaInicio.toLocaleDateString() : 'Hoy'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'fin' && styles.btnActivo]} onPress={() => setModoPicker('fin')}>
-            <Text style={styles.lblFecha}>HASTA</Text>
-            <Text style={[styles.valFecha, { color: textColor }]}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
-          </TouchableOpacity>
-          {(fechaInicio || fechaFin) && (
-            <TouchableOpacity style={styles.btnLimpiar} onPress={() => { setFechaInicio(null); setFechaFin(null); setModoPicker(null); }}>
-              <Text style={styles.lblLimpiar}>✕</Text>
+        <View style={styles.rowChipsSemana}>
+          {[
+            { key: 'esta', label: '📅 Esta semana' },
+            { key: 'proxima', label: '📅 Próx. semana' },
+          ].map(({ key, label }) => (
+            <TouchableOpacity
+              key={key}
+              style={[styles.chipSemana, filtroSemana === key && styles.chipSemanaActivo]}
+              onPress={() => setFiltroSemana(filtroSemana === key ? null : key)}
+            >
+              <Text style={[styles.chipSemanaTxt, filtroSemana === key && { color: primaryColor, fontWeight: 'bold' }]}>
+                {label}
+              </Text>
             </TouchableOpacity>
-          )}
+          ))}
         </View>
+
+        {!filtroSemana && (
+          <View style={styles.rowFechas}>
+            <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'inicio' && styles.btnActivo]} onPress={() => setModoPicker('inicio')}>
+              <Text style={styles.lblFecha}>DESDE</Text>
+              <Text style={[styles.valFecha, { color: textColor }]}>{fechaInicio ? fechaInicio.toLocaleDateString() : 'Hoy'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.btnFecha, styles.btnFechaFlexible, modoPicker === 'fin' && styles.btnActivo]} onPress={() => setModoPicker('fin')}>
+              <Text style={styles.lblFecha}>HASTA</Text>
+              <Text style={[styles.valFecha, { color: textColor }]}>{fechaFin ? fechaFin.toLocaleDateString() : 'Siempre'}</Text>
+            </TouchableOpacity>
+            {(fechaInicio || fechaFin) && (
+              <TouchableOpacity style={styles.btnLimpiar} onPress={() => { setFechaInicio(null); setFechaFin(null); setModoPicker(null); }}>
+                <Text style={styles.lblLimpiar}>✕</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </View>
 
       {modoPicker && (
@@ -419,7 +488,30 @@ const styles = StyleSheet.create({
   textoBusqueda: { color: '#166534', fontWeight: 'bold', fontSize: 16 },
 
   puntoGps: { width: 20, height: 20, backgroundColor: '#3b82f6', borderRadius: 10, borderWidth: 3, borderColor: 'white', elevation: 5 },
-  marcador: { backgroundColor: 'white', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#166534' },
+  rowChipsSemana: { flexDirection: 'row', gap: 8, marginTop: 12 },
+  chipSemana: {
+    flex: 1, paddingVertical: 8, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)',
+    alignItems: 'center',
+  },
+  chipSemanaActivo: { backgroundColor: 'rgba(255,255,255,0.95)' },
+  chipSemanaTxt: { fontSize: 13, fontWeight: '500', color: 'rgba(255,255,255,0.9)' },
+
+  marcador: { backgroundColor: 'white', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#166634', alignItems: 'center' },
+  marcadorAmigos: { borderWidth: 3, borderColor: '#f59e0b', backgroundColor: '#fffbeb' },
+  marcadorVas: { borderWidth: 3, backgroundColor: '#f0fdf4' },
+  badgeVas: {
+    position: 'absolute', top: -8, right: -10,
+    backgroundColor: '#22c55e', borderRadius: 10,
+    width: 18, height: 18, alignItems: 'center', justifyContent: 'center',
+  },
+  badgeVasTxt: { fontSize: 10, fontWeight: 'bold', color: 'white' },
+  badgeAmigos: {
+    position: 'absolute', top: -8, right: -10,
+    backgroundColor: '#f59e0b', borderRadius: 10,
+    paddingHorizontal: 5, paddingVertical: 1,
+  },
+  badgeAmigosTxt: { fontSize: 10, fontWeight: 'bold', color: '#1e1e1e' },
   modalCalendario: { position: 'absolute', top: 150, left: 20, right: 20, backgroundColor: 'white', borderRadius: 20, padding: 10, zIndex: 100, elevation: 20 },
 
   headerPanel: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
