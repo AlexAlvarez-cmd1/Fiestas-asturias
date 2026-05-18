@@ -1,6 +1,11 @@
 grupoId;nombre;concejo;fecha;orquesta;dj;latitud;longitud;imagen;linkEntradas;esVersity;linkVersity
-;Fiesta de San Roque;AvilÃ©s;2026-08-16;Panorama;;43.5547;-5.9248;;;;
-1;Fiestas del Cristo;Oviedo;2026-08-14;Orquesta Panorama;DJ Nano;43.3614;-5.8593;;;;
-1;;Oviedo;2026-08-15;Orquesta Tekila;;;;;;;;
-1;;Oviedo;2026-08-16;Orquesta ParÃ­s de Noia;DJ XYZ;;;;;;;;
-1;;Oviedo;2026-08-17;Orquesta Olympo;;;;;;;;
+1;Exconxuraos;Llanera;2026-07-03;Panorama y Cinema;;43.43101854720940;-5.864959073120380;;;;
+;;;2026-07-04;Grupo América de Vigo;DJ RVS;43.43101854720940;-5.864959073120380;;;;
+2;Fiestas del Llano;Gijón;2026-05-22;Pasito Show;DJ Grand;43.522534359043300;-5.661532499454950;;;;
+;;;2026-05-23;Los Testigos-BBC;Suarezz DJ;43.522534359043300;-5.661532499454950;;;;
+;;;2026-05-24;Mina Longo;DJ Hugo;43.522534359043300;-5.661532499454950;;;;
+3;Fiestas de Ventanielles;Oviedop;2026-05-22;La Bamba;;43.36745516546292; -5.8318143062317525;;;;
+;;;2026-05-23;Grupo Tekila;;43.36745516546292; -5.8318143062317525;;;;
+;;;2026-05-24;Grupo Ideas;;43.36745516546292; -5.8318143062317525;;;;
+;;;2026-05-25;Grupo Cinema;;43.36745516546292; -5.8318143062317525;;;;
+;;;2026-05-26;;Discomovil;43.36745516546292; -5.8318143062317525;;;;
