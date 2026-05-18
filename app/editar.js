@@ -11,15 +11,27 @@ import { useAuth } from '../contexts/AuthContext';
 import { db, storage } from '../firebaseConfig';
 import { cacheService } from '../services/cacheService';
 
-const CATEGORIAS = ['Romería', 'Verbena', 'Festival', 'Carnaval', 'Feria', 'Otro'];
-
 const comprimirImagen = async (uri) => {
   const result = await ImageManipulator.manipulateAsync(
-    uri,
-    [{ resize: { width: 900 } }],
-    { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG }
+    uri, [{ resize: { width: 900 } }], { compress: 0.72, format: ImageManipulator.SaveFormat.JPEG }
   );
   return result.uri;
+};
+
+const fmtFecha = (d) => d.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const toStr = (d) => d.toISOString().split('T')[0];
+
+const generarDias = (inicio, fin, prev = []) => {
+  const result = [];
+  const cur = new Date(inicio); cur.setHours(0, 0, 0, 0);
+  const end = new Date(fin);    end.setHours(0, 0, 0, 0);
+  while (cur <= end) {
+    const s = toStr(cur);
+    const ex = prev.find(d => d.fecha === s);
+    result.push({ fecha: s, orquesta: ex?.orquesta || '', dj: ex?.dj || '' });
+    cur.setDate(cur.getDate() + 1);
+  }
+  return result;
 };
 
 export default function PantallaEditar() {
@@ -30,18 +42,21 @@ export default function PantallaEditar() {
 
   useEffect(() => {
     if (!userProfile) return;
-    const esAdmin = userProfile.isAdmin === true;
-    if (!esAdmin) {
+    if (userProfile.isAdmin !== true) {
       Alert.alert('Acceso denegado', 'Solo los administradores pueden editar fiestas.');
       router.replace('/(tabs)');
     }
   }, [userProfile]);
 
+  const diasIniciales = (() => {
+    try { return params.diasJson ? JSON.parse(params.diasJson) : []; } catch { return []; }
+  })();
+  const tieneMultiDia = diasIniciales.length > 0 || !!params.fechaFin;
+
   const [nombre, setNombre] = useState(params.nombre || '');
   const [concejo, setConcejo] = useState(params.concejo || '');
-  const [categoria, setCategoria] = useState(params.categoria || '');
   const [orquesta, setOrquesta] = useState(params.orquesta || '');
-  const [descripcion, setDescripcion] = useState(params.descripcion || '');
+  const [dj, setDj] = useState(params.dj || '');
   const [linkEntradas, setLinkEntradas] = useState(params.linkEntradas || '');
   const [fecha, setFecha] = useState(params.fecha ? new Date(params.fecha) : new Date());
   const [imagenUri, setImagenUri] = useState(params.imagen || null);
@@ -57,21 +72,43 @@ export default function PantallaEditar() {
   const [mostrarPicker, setMostrarPicker] = useState(false);
   const [errores, setErrores] = useState({});
 
+  const [esMultiDia, setEsMultiDia] = useState(tieneMultiDia);
+  const [fechaFin, setFechaFin] = useState(params.fechaFin ? new Date(params.fechaFin) : new Date());
+  const [mostrarPickerFin, setMostrarPickerFin] = useState(false);
+  const [dias, setDias] = useState(tieneMultiDia ? diasIniciales : []);
+
   const seleccionarImagen = async () => {
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ['images'], allowsEditing: true, aspect: [3, 4], quality: 1,
-    });
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [3, 4], quality: 1 });
     if (!result.canceled) {
       const uri = await comprimirImagen(result.assets[0].uri);
-      setImagenUri(uri);
-      setNuevaImagenUri(uri);
+      setImagenUri(uri); setNuevaImagenUri(uri);
     }
+  };
+
+  const activarMultiDia = (valor) => {
+    setEsMultiDia(valor);
+    if (valor) setDias(prev => generarDias(fecha, fechaFin, prev));
+  };
+
+  const cambiarFechaInicio = (d) => {
+    setFecha(d);
+    if (esMultiDia) setDias(prev => generarDias(d, fechaFin, prev));
+  };
+
+  const cambiarFechaFin = (d) => {
+    setFechaFin(d);
+    if (esMultiDia) setDias(prev => generarDias(fecha, d, prev));
+  };
+
+  const actualizarDia = (index, campo, valor) => {
+    setDias(prev => prev.map((d, i) => i === index ? { ...d, [campo]: valor } : d));
   };
 
   const validar = () => {
     const e = {};
     if (!nombre.trim() || nombre.trim().length < 3) e.nombre = 'El nombre es obligatorio (mín. 3 caracteres)';
     if (!concejo.trim()) e.concejo = 'El concejo es obligatorio';
+    if (esMultiDia && fechaFin <= fecha) e.fechaFin = 'La fecha de fin debe ser posterior al inicio';
     if (esVersity && !linkVersity.trim()) e.linkVersity = 'Añade el enlace de Versity';
     setErrores(e);
     return Object.keys(e).length === 0;
@@ -83,20 +120,17 @@ export default function PantallaEditar() {
     let urlImagenFinal = imagenUri;
     try {
       if (nuevaImagenUri) {
-        const response = await fetch(nuevaImagenUri);
-        const blob = await response.blob();
+        const blob = await (await fetch(nuevaImagenUri)).blob();
         const storageRef = ref(storage, `carteles/${Date.now()}.jpg`);
         await uploadBytes(storageRef, blob);
         urlImagenFinal = await getDownloadURL(storageRef);
       }
       await updateDoc(doc(db, "fiestas", params.id), {
-        nombre,
-        concejo,
-        categoria,
-        orquesta,
-        descripcion,
-        linkEntradas,
-        fecha: fecha.toISOString().split('T')[0],
+        nombre, concejo, linkEntradas,
+        fecha: toStr(fecha),
+        ...(esMultiDia
+          ? { fechaFin: toStr(fechaFin), dias, orquesta: '', dj: '' }
+          : { orquesta, dj, fechaFin: '', dias: [] }),
         imagen: urlImagenFinal,
         ubicacion: new GeoPoint(ubicacionSeleccionada.latitude, ubicacionSeleccionada.longitude),
         esVersity: esVersity ? 'true' : 'false',
@@ -132,52 +166,78 @@ export default function PantallaEditar() {
         />
         {errores.concejo && <Text style={styles.errorTxt}>{errores.concejo}</Text>}
 
-        <Text style={styles.label}>Categoría</Text>
-        <View style={styles.categoriasRow}>
-          {CATEGORIAS.map(cat => (
-            <TouchableOpacity
-              key={cat}
-              style={[styles.categoriaChip, categoria === cat && styles.categoriaChipActivo]}
-              onPress={() => setCategoria(categoria === cat ? '' : cat)}
-            >
-              <Text style={[styles.categoriaChipTxt, categoria === cat && styles.categoriaChipTxtActivo]}>
-                {cat}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        {/* ── FECHAS ── */}
+        <Text style={styles.label}>Fecha de inicio</Text>
+        <TouchableOpacity style={styles.input} onPress={() => setMostrarPicker(true)}>
+          <Text>{fmtFecha(fecha)}</Text>
+        </TouchableOpacity>
+        {mostrarPicker && (
+          <DateTimePicker value={fecha} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'}
+            onChange={(_, d) => { setMostrarPicker(false); if (d) cambiarFechaInicio(d); }} />
+        )}
+
+        <View style={styles.seccionMultiDia}>
+          <View style={styles.rowSwitch}>
+            <Text style={styles.labelMultiDia}>📅 ¿Fiesta de varios días?</Text>
+            <Switch value={esMultiDia} onValueChange={activarMultiDia}
+              trackColor={{ false: '#d1d5db', true: '#86efac' }}
+              thumbColor={esMultiDia ? '#166534' : '#f3f4f6'}
+            />
+          </View>
+
+          {esMultiDia && (
+            <>
+              <Text style={[styles.label, { marginTop: 12 }]}>Fecha de fin <Text style={styles.req}>*</Text></Text>
+              <TouchableOpacity
+                style={[styles.input, errores.fechaFin && styles.inputError]}
+                onPress={() => setMostrarPickerFin(true)}
+              >
+                <Text>{fmtFecha(fechaFin)}</Text>
+              </TouchableOpacity>
+              {errores.fechaFin && <Text style={styles.errorTxt}>{errores.fechaFin}</Text>}
+              {mostrarPickerFin && (
+                <DateTimePicker value={fechaFin} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'}
+                  onChange={(_, d) => { setMostrarPickerFin(false); if (d) cambiarFechaFin(d); }} />
+              )}
+
+              <Text style={[styles.label, { marginTop: 16 }]}>Programa por día</Text>
+              {dias.map((dia, i) => (
+                <View key={dia.fecha} style={styles.diaCard}>
+                  <Text style={styles.diaFecha}>
+                    {new Date(dia.fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                  </Text>
+                  <TextInput
+                    style={[styles.input, styles.diaInput]}
+                    placeholder="Orquesta / Música"
+                    value={dia.orquesta}
+                    onChangeText={v => actualizarDia(i, 'orquesta', v)}
+                  />
+                  <TextInput
+                    style={[styles.input, styles.diaInput]}
+                    placeholder="🎧 DJ (opcional)"
+                    value={dia.dj}
+                    onChangeText={v => actualizarDia(i, 'dj', v)}
+                  />
+                </View>
+              ))}
+            </>
+          )}
         </View>
 
-        <Text style={styles.label}>Música / Orquesta</Text>
-        <TextInput style={styles.input} value={orquesta} onChangeText={setOrquesta} />
-
-        <Text style={styles.label}>Descripción</Text>
-        <TextInput
-          style={[styles.input, styles.inputMultiline]}
-          value={descripcion}
-          onChangeText={setDescripcion}
-          placeholder="Detalles de la fiesta, horario, programación..."
-          multiline
-          numberOfLines={4}
-          textAlignVertical="top"
-        />
+        {!esMultiDia && (
+          <>
+            <Text style={styles.label}>Música / Orquesta</Text>
+            <TextInput style={styles.input} value={orquesta} onChangeText={setOrquesta} />
+            <Text style={styles.label}>🎧 DJ</Text>
+            <TextInput style={styles.input} value={dj} onChangeText={setDj} placeholder="Ej: DJ Nano..." />
+          </>
+        )}
 
         <Text style={styles.label}>🎟️ Enlace para comprar entradas</Text>
         <TextInput
-          style={styles.input}
-          value={linkEntradas}
-          onChangeText={setLinkEntradas}
-          placeholder="https://entradas.com/..."
-          autoCapitalize="none"
-          keyboardType="url"
+          style={styles.input} value={linkEntradas} onChangeText={setLinkEntradas}
+          placeholder="https://entradas.com/..." autoCapitalize="none" keyboardType="url"
         />
-
-        <Text style={styles.label}>Fecha</Text>
-        <TouchableOpacity style={styles.input} onPress={() => setMostrarPicker(true)}>
-          <Text>{fecha.toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}</Text>
-        </TouchableOpacity>
-        {mostrarPicker && (
-          <DateTimePicker value={fecha} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(e, d) => { setMostrarPicker(false); if (d) setFecha(d); }} />
-        )}
 
         <View style={styles.seccionVersity}>
           <View style={styles.rowVersity}>
@@ -190,9 +250,7 @@ export default function PantallaEditar() {
                 style={[styles.input, { marginTop: 10 }, errores.linkVersity && styles.inputError]}
                 value={linkVersity}
                 onChangeText={t => { setLinkVersity(t); setErrores(e => ({ ...e, linkVersity: null })); }}
-                placeholder="Enlace de Versity"
-                autoCapitalize="none"
-                keyboardType="url"
+                placeholder="Enlace de Versity" autoCapitalize="none" keyboardType="url"
               />
               {errores.linkVersity && <Text style={styles.errorTxt}>{errores.linkVersity}</Text>}
             </>
@@ -212,9 +270,7 @@ export default function PantallaEditar() {
             initialRegion={{ latitude: lat, longitude: lon, latitudeDelta: 0.01, longitudeDelta: 0.01 }}
             onPress={(e) => {
               const c = e.nativeEvent.coordinate;
-              setUbicacionSeleccionada(c);
-              setLat(c.latitude);
-              setLon(c.longitude);
+              setUbicacionSeleccionada(c); setLat(c.latitude); setLon(c.longitude);
             }}
           >
             <Marker coordinate={ubicacionSeleccionada} />
@@ -239,14 +295,13 @@ const styles = StyleSheet.create({
   inputError: { borderColor: '#ef4444', borderWidth: 1.5 },
   errorTxt: { color: '#ef4444', fontSize: 12, marginTop: 4, marginLeft: 4 },
 
-  categoriasRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 4 },
-  categoriaChip: {
-    paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20,
-    backgroundColor: '#f1f5f9', borderWidth: 1, borderColor: '#e2e8f0',
-  },
-  categoriaChipActivo: { backgroundColor: '#166534', borderColor: '#166534' },
-  categoriaChipTxt: { fontSize: 13, fontWeight: '600', color: '#475569' },
-  categoriaChipTxtActivo: { color: 'white' },
+  seccionMultiDia: { backgroundColor: '#f0fdf4', padding: 15, borderRadius: 10, marginTop: 20, borderWidth: 1, borderColor: '#86efac' },
+  rowSwitch: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  labelMultiDia: { fontWeight: 'bold', color: '#166534', fontSize: 15 },
+
+  diaCard: { backgroundColor: 'white', borderRadius: 10, padding: 12, marginTop: 10, borderWidth: 1, borderColor: '#d1fae5' },
+  diaFecha: { fontWeight: 'bold', color: '#166534', marginBottom: 8, textTransform: 'capitalize', fontSize: 14 },
+  diaInput: { marginTop: 8 },
 
   seccionVersity: { backgroundColor: '#ffedd5', padding: 15, borderRadius: 10, marginTop: 20, borderWidth: 1, borderColor: '#fdba74' },
   rowVersity: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },

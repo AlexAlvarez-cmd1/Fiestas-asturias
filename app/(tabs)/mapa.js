@@ -64,6 +64,7 @@ export default function PantallaMapa() {
   const [modoPicker, setModoPicker] = useState(null);
   const [busqueda, setBusqueda] = useState('');
   const [orquestaFiltro, setOrquestaFiltro] = useState('');
+  const [djFiltro, setDjFiltro] = useState('');
   const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
   const [soloFavoritos, setSoloFavoritos] = useState(false);
   const [favoritosIds, setFavoritosIds] = useState([]);
@@ -199,7 +200,14 @@ export default function PantallaMapa() {
 
     // 2. Filtro por orquesta
     if (orquestaFiltro.trim() !== '') {
-      if (!norm(fiesta.orquesta).includes(norm(orquestaFiltro))) return false;
+      const enDias = (fiesta.dias || []).some(d => norm(d.orquesta).includes(norm(orquestaFiltro)));
+      if (!norm(fiesta.orquesta).includes(norm(orquestaFiltro)) && !enDias) return false;
+    }
+
+    // 2b. Filtro por DJ
+    if (djFiltro.trim() !== '') {
+      const enDias = (fiesta.dias || []).some(d => norm(d.dj).includes(norm(djFiltro)));
+      if (!norm(fiesta.dj).includes(norm(djFiltro)) && !enDias) return false;
     }
 
 // Filtro Favoritos
@@ -297,8 +305,9 @@ export default function PantallaMapa() {
                   fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
                   latitud: fiesta.ubicacion.latitude, longitud: fiesta.ubicacion.longitude,
                   esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
-                  descripcion: fiesta.descripcion || '',
-                  categoria: fiesta.categoria || '',
+                  dj: fiesta.dj || '',
+                  fechaFin: fiesta.fechaFin || '',
+                  diasJson: fiesta.dias ? JSON.stringify(fiesta.dias) : '',
                   linkEntradas: fiesta.linkEntradas || '',
                 },
               });
@@ -440,9 +449,17 @@ export default function PantallaMapa() {
               placeholderTextColor={isDark ? '#666' : '#999'}
             />
 
+            <TextInput
+              style={[styles.inputModal, isDark && styles.inputModalDark]}
+              placeholder="Filtrar por DJ..."
+              value={djFiltro}
+              onChangeText={setDjFiltro}
+              placeholderTextColor={isDark ? '#666' : '#999'}
+            />
+
             <TouchableOpacity
               style={[styles.btnLimpiarModal, isDark && styles.btnLimpiarModalDark]}
-              onPress={() => { setBusqueda(''); setOrquestaFiltro(''); }}
+              onPress={() => { setBusqueda(''); setOrquestaFiltro(''); setDjFiltro(''); }}
             >
               <Text style={[styles.textoLimpiarModal, isDark && { color: '#ff9041' }]}>
                 🔄 Limpiar filtros

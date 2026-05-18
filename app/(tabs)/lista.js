@@ -40,15 +40,13 @@ export default function PantallaLista() {
   const [selectedDay, setSelectedDay] = useState(null);
   const [filtroConcejo, setFiltroConcejo] = useState('');
   const [filtroOrquesta, setFiltroOrquesta] = useState('');
+  const [filtroDj, setFiltroDj] = useState('');
   const [soloFavoritos, setSoloFavoritos] = useState(false);
   const [favoritosIds, setFavoritosIds] = useState([]);
   const [modalFiltrosVisible, setModalFiltrosVisible] = useState(false);
   const [amigosEnFiestas, setAmigosEnFiestas] = useState({});
   const [misAsistencias, setMisAsistencias] = useState([]);
   const [filtroSemana, setFiltroSemana] = useState(null); // null | 'esta' | 'proxima'
-  const [filtroCategoria, setFiltroCategoria] = useState('');
-
-  const CATEGORIAS = ['Romería', 'Verbena', 'Festival', 'Carnaval', 'Feria', 'Otro'];
 
   const cargar = async (isRefresh = false) => {
     if (!isRefresh) {
@@ -111,15 +109,21 @@ export default function PantallaLista() {
     return Array.from(set).sort();
   }, [fiestas]);
 
-  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos, filtroSemana, filtroCategoria].filter(Boolean).length;
+  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), filtroDj.trim(), soloFavoritos, filtroSemana].filter(Boolean).length;
 
   const fiestasFiltradas = fiestas
     .filter(f => {
       if (!f.fecha) return false;
       if (soloFavoritos && !favoritosIds.includes(f.id)) return false;
       if (filtroConcejo && f.concejo !== filtroConcejo) return false;
-      if (filtroCategoria && f.categoria !== filtroCategoria) return false;
-      if (filtroOrquesta.trim() && !norm(f.orquesta).includes(norm(filtroOrquesta))) return false;
+      if (filtroOrquesta.trim()) {
+        const enDias = (f.dias || []).some(d => norm(d.orquesta).includes(norm(filtroOrquesta)));
+        if (!norm(f.orquesta).includes(norm(filtroOrquesta)) && !enDias) return false;
+      }
+      if (filtroDj.trim()) {
+        const enDias = (f.dias || []).some(d => norm(d.dj).includes(norm(filtroDj)));
+        if (!norm(f.dj).includes(norm(filtroDj)) && !enDias) return false;
+      }
       if (filtroSemana) {
         const fin = new Date(hoy);
         if (filtroSemana === 'esta') {
@@ -186,8 +190,9 @@ export default function PantallaLista() {
       fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
       latitud: fiesta.ubicacion?.latitude, longitud: fiesta.ubicacion?.longitude,
       esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
-      descripcion: fiesta.descripcion || '',
-      categoria: fiesta.categoria || '',
+      dj: fiesta.dj || '',
+      fechaFin: fiesta.fechaFin || '',
+      diasJson: fiesta.dias ? JSON.stringify(fiesta.dias) : '',
       linkEntradas: fiesta.linkEntradas || '',
     },
   });
@@ -195,9 +200,10 @@ export default function PantallaLista() {
   // ─── Render: list card ─────────────────────────────────────────────────────
 
   const renderFiesta = ({ item: fiesta }) => {
-    const fecha = new Date(fiesta.fecha).toLocaleDateString('es-ES', {
-      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
-    });
+    const fechaStr = new Date(fiesta.fecha).toLocaleDateString('es-ES', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+    const fecha = fiesta.fechaFin
+      ? `${new Date(fiesta.fecha).toLocaleDateString('es-ES', { day: 'numeric', month: 'short' })} – ${new Date(fiesta.fechaFin).toLocaleDateString('es-ES', { day: 'numeric', month: 'short', year: 'numeric' })}`
+      : fechaStr;
     return (
       <TouchableOpacity
         style={[styles.card, isDark && styles.cardDark]}
@@ -214,14 +220,16 @@ export default function PantallaLista() {
               <Text style={[styles.nombre, isDark && styles.textDark, { flex: 1 }]} numberOfLines={1}>
                 {fiesta.nombre}
               </Text>
-              {fiesta.categoria ? (
-                <Text style={styles.categoriaTag}>{fiesta.categoria}</Text>
-              ) : null}
             </View>
             <Text style={[styles.concejo, isDark && styles.subTextDark]}>📍 {fiesta.concejo}</Text>
             {fiesta.orquesta ? (
               <Text style={[styles.orquesta, isDark && styles.subTextDark]} numberOfLines={1}>
                 🎵 {fiesta.orquesta}
+              </Text>
+            ) : null}
+            {fiesta.dj ? (
+              <Text style={[styles.orquesta, isDark && styles.subTextDark]} numberOfLines={1}>
+                🎧 {fiesta.dj}
               </Text>
             ) : null}
             {fiesta.numValoraciones > 0 && (
@@ -533,25 +541,6 @@ export default function PantallaLista() {
             ))}
           </ScrollView>
 
-          <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🏷️ Categoría</Text>
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsRow}>
-            <TouchableOpacity
-              style={[styles.chip, !filtroCategoria && { backgroundColor: primaryColor }]}
-              onPress={() => setFiltroCategoria('')}
-            >
-              <Text style={[styles.chipTxt, !filtroCategoria && { color: textColor }]}>Todas</Text>
-            </TouchableOpacity>
-            {CATEGORIAS.map(cat => (
-              <TouchableOpacity
-                key={cat}
-                style={[styles.chip, filtroCategoria === cat && { backgroundColor: primaryColor }]}
-                onPress={() => setFiltroCategoria(filtroCategoria === cat ? '' : cat)}
-              >
-                <Text style={[styles.chipTxt, filtroCategoria === cat && { color: textColor }]}>{cat}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-
           <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🎵 Orquesta</Text>
           <TextInput
             style={[styles.filtroInput, isDark && styles.filtroInputDark]}
@@ -561,10 +550,19 @@ export default function PantallaLista() {
             onChangeText={setFiltroOrquesta}
           />
 
+          <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🎧 DJ</Text>
+          <TextInput
+            style={[styles.filtroInput, isDark && styles.filtroInputDark]}
+            placeholder="Nombre del DJ..."
+            placeholderTextColor="#888"
+            value={filtroDj}
+            onChangeText={setFiltroDj}
+          />
+
           <View style={styles.filtrosBtns}>
             <TouchableOpacity
               style={[styles.btnLimpiar, isDark && styles.btnLimpiarDark]}
-              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); setFiltroSemana(null); setFiltroCategoria(''); }}
+              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setFiltroDj(''); setSoloFavoritos(false); setFiltroSemana(null); }}
             >
               <Text style={[styles.btnLimpiarTxt, isDark && styles.subTextDark]}>Limpiar</Text>
             </TouchableOpacity>
@@ -699,11 +697,6 @@ const styles = StyleSheet.create({
   textoContainer: { flex: 1 },
   nombreRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   nombre: { fontSize: 17, fontWeight: 'bold', color: '#1e293b' },
-  categoriaTag: {
-    fontSize: 11, fontWeight: '700', color: '#166534',
-    backgroundColor: '#dcfce7', paddingHorizontal: 7, paddingVertical: 2,
-    borderRadius: 8, overflow: 'hidden',
-  },
   textDark: { color: '#f1f1f1' },
   concejo: { color: '#64748b', fontSize: 14, marginTop: 3 },
   orquesta: { color: '#64748b', fontSize: 13, marginTop: 2 },

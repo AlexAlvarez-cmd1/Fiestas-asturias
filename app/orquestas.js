@@ -15,9 +15,11 @@ export default function PantallaOrquestas() {
   const isDark = theme === 'dark';
 
   const [orquestas, setOrquestas] = useState([]);
+  const [djs, setDjs] = useState([]);
   const [fiestas, setFiestas] = useState([]);
   const [seguidas, setSeguidas] = useState([]);
   const [expandida, setExpandida] = useState(null);
+  const [tab, setTab] = useState('orquestas'); // 'orquestas' | 'djs'
   const [cargando, setCargando] = useState(true);
 
   useEffect(() => {
@@ -25,12 +27,16 @@ export default function PantallaOrquestas() {
       const data = await cacheService.getCachedFiestas() || [];
       setFiestas(data);
 
-      // Build orchestra list with fiesta count
+      // Build orchestra list (top-level + multiday dias)
       const mapa = {};
       data.forEach(f => {
-        if (!f.orquesta) return;
-        if (!mapa[f.orquesta]) mapa[f.orquesta] = [];
-        mapa[f.orquesta].push(f);
+        const entradas = f.dias?.length
+          ? f.dias.filter(d => d.orquesta).map(d => ({ ...f, orquesta: d.orquesta, _diaFecha: d.fecha }))
+          : (f.orquesta ? [f] : []);
+        entradas.forEach(entry => {
+          if (!mapa[entry.orquesta]) mapa[entry.orquesta] = [];
+          mapa[entry.orquesta].push(f);
+        });
       });
 
       const lista = Object.entries(mapa)
@@ -38,6 +44,23 @@ export default function PantallaOrquestas() {
         .sort((a, b) => b.fiestas.length - a.fiestas.length);
 
       setOrquestas(lista);
+
+      // Build DJ list (top-level + multiday dias)
+      const mapaDjs = {};
+      data.forEach(f => {
+        const entradas = f.dias?.length
+          ? f.dias.filter(d => d.dj).map(d => ({ ...f, dj: d.dj }))
+          : (f.dj ? [f] : []);
+        entradas.forEach(entry => {
+          if (!mapaDjs[entry.dj]) mapaDjs[entry.dj] = [];
+          mapaDjs[entry.dj].push(f);
+        });
+      });
+      const listaDjs = Object.entries(mapaDjs)
+        .map(([nombre, items]) => ({ nombre, fiestas: items.sort((a, b) => new Date(a.fecha) - new Date(b.fecha)) }))
+        .sort((a, b) => b.fiestas.length - a.fiestas.length);
+      setDjs(listaDjs);
+
       setSeguidas(await logrosService.getOrquestasList());
       setCargando(false);
     };
@@ -56,8 +79,9 @@ export default function PantallaOrquestas() {
       fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
       latitud: fiesta.ubicacion?.latitude, longitud: fiesta.ubicacion?.longitude,
       esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
-      descripcion: fiesta.descripcion || '',
-      categoria: fiesta.categoria || '',
+      dj: fiesta.dj || '',
+      fechaFin: fiesta.fechaFin || '',
+      diasJson: fiesta.dias ? JSON.stringify(fiesta.dias) : '',
       linkEntradas: fiesta.linkEntradas || '',
     },
   });
@@ -145,12 +169,28 @@ export default function PantallaOrquestas() {
       />
 
       <View style={[styles.headerBand, { backgroundColor: primaryColor }]}>
-        <Text style={[styles.titulo, { color: textColor }]}>🎵 Orquestas</Text>
-        <Text style={[styles.subtitulo, { color: textColor, opacity: 0.8 }]}>
-          {seguidas.length > 0
-            ? `Siguiendo ${seguidas.length} orquesta${seguidas.length > 1 ? 's' : ''}`
-            : 'Sigue tus orquestas favoritas'}
+        <Text style={[styles.titulo, { color: textColor }]}>
+          {tab === 'orquestas' ? '🎵 Orquestas' : '🎧 DJs'}
         </Text>
+        <Text style={[styles.subtitulo, { color: textColor, opacity: 0.8 }]}>
+          {tab === 'orquestas'
+            ? (seguidas.length > 0 ? `Siguiendo ${seguidas.length} orquesta${seguidas.length > 1 ? 's' : ''}` : 'Sigue tus orquestas favoritas')
+            : `${djs.length} DJ${djs.length !== 1 ? 's' : ''} encontrado${djs.length !== 1 ? 's' : ''}`}
+        </Text>
+        <View style={styles.tabRow}>
+          <TouchableOpacity
+            style={[styles.tabBtn, tab === 'orquestas' && styles.tabBtnActivo]}
+            onPress={() => { setTab('orquestas'); setExpandida(null); }}
+          >
+            <Text style={[styles.tabBtnTxt, tab === 'orquestas' && { color: primaryColor }]}>🎵 Orquestas</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.tabBtn, tab === 'djs' && styles.tabBtnActivo]}
+            onPress={() => { setTab('djs'); setExpandida(null); }}
+          >
+            <Text style={[styles.tabBtnTxt, tab === 'djs' && { color: primaryColor }]}>🎧 DJs</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       {seguidas.length > 0 && (
@@ -177,16 +217,16 @@ export default function PantallaOrquestas() {
         <View style={styles.loader}>
           <ActivityIndicator size="large" color={primaryColor} />
         </View>
-      ) : orquestas.length === 0 ? (
+      ) : (tab === 'orquestas' ? orquestas : djs).length === 0 ? (
         <View style={styles.vacio}>
-          <Text style={styles.vacioEmoji}>🎶</Text>
+          <Text style={styles.vacioEmoji}>{tab === 'orquestas' ? '🎶' : '🎧'}</Text>
           <Text style={[styles.vacioTxt, isDark && styles.textDark]}>
-            Aún no hay orquestas registradas
+            {tab === 'orquestas' ? 'Aún no hay orquestas registradas' : 'Aún no hay DJs registrados'}
           </Text>
         </View>
       ) : (
         <FlatList
-          data={orquestas}
+          data={tab === 'orquestas' ? orquestas : djs}
           keyExtractor={item => item.nombre}
           renderItem={renderOrquesta}
           contentContainerStyle={styles.lista}
@@ -207,6 +247,15 @@ const styles = StyleSheet.create({
   },
   titulo: { fontSize: 24, fontWeight: 'bold' },
   subtitulo: { fontSize: 13, marginTop: 3 },
+  tabRow: {
+    flexDirection: 'row', gap: 8, marginTop: 14,
+  },
+  tabBtn: {
+    flex: 1, paddingVertical: 8, borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.15)', alignItems: 'center',
+  },
+  tabBtnActivo: { backgroundColor: 'rgba(255,255,255,0.95)' },
+  tabBtnTxt: { fontSize: 14, fontWeight: '600', color: 'rgba(255,255,255,0.9)' },
 
   seguidasRow: { borderBottomWidth: 1, borderBottomColor: 'rgba(0,0,0,0.06)' },
   seguidaChip: {

@@ -24,7 +24,8 @@ export default function PantallaDetalle() {
   const router = useRouter();
   const rawParams = useLocalSearchParams();
   const [fiestaData, setFiestaData] = useState(rawParams);
-  const { id, nombre, concejo, orquesta, imagen, latitud, longitud, fecha, linkVersity, esVersity, descripcion, categoria, linkEntradas } = fiestaData;
+  const { id, nombre, concejo, orquesta, dj, imagen, latitud, longitud, fecha, fechaFin, diasJson, linkVersity, esVersity, linkEntradas } = fiestaData;
+  const dias = (() => { try { return diasJson ? JSON.parse(diasJson) : null; } catch { return null; } })();
   const shareCardRef = useRef(null);
   const [modalTarjeta, setModalTarjeta] = useState(false);
   const [capturando, setCapturando] = useState(false);
@@ -190,7 +191,7 @@ export default function PantallaDetalle() {
     const fechaStr = fecha
       ? new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
       : '';
-    return `🎪 ${nombre}\n📅 ${fechaStr}\n📍 ${concejo}${orquesta ? `\n🎵 ${orquesta}` : ''}\n\n¡Descarga Folixa para descubrir más fiestas en Asturias! 🍺`;
+    return `🎪 ${nombre}\n📅 ${fechaStr}\n📍 ${concejo}${orquesta ? `\n🎵 ${orquesta}` : ''}${dj ? `\n🎧 ${dj}` : ''}\n\n¡Descarga Folixa para descubrir más fiestas en Asturias! 🍺`;
   };
 
   const compartirImagen = async () => {
@@ -313,9 +314,16 @@ export default function PantallaDetalle() {
 
   const infoUrbano = transporteUrbano[concejo];
 
-  const fechaFormateada = fecha ? new Date(fecha).toLocaleDateString('es-ES', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  }) : 'Fecha no disponible';
+  const fechaFormateada = (() => {
+    if (!fecha) return 'Fecha no disponible';
+    const opts = { day: 'numeric', month: 'long', year: 'numeric' };
+    const inicio = new Date(fecha).toLocaleDateString('es-ES', opts);
+    if (fechaFin) {
+      const fin = new Date(fechaFin).toLocaleDateString('es-ES', opts);
+      return `${inicio} — ${fin}`;
+    }
+    return new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', ...opts });
+  })();
 
   const seleccionarAppMapa = () => {
     const lat = latitud;
@@ -454,19 +462,6 @@ export default function PantallaDetalle() {
         {/* CONTENIDO SEGÚN TAB */}
         {tabDetalle === 'info' ? (
           <View style={[styles.tabContent, isDark && styles.tabContentDark]}>
-            {categoria ? (
-              <View style={[styles.categoriaBadge, isDark && styles.categoriaBadgeDark]}>
-                <Text style={[styles.categoriaBadgeTxt, isDark && { color: '#86efac' }]}>{categoria}</Text>
-              </View>
-            ) : null}
-
-            {descripcion ? (
-              <>
-                <Text style={styles.label}>📝 Descripción</Text>
-                <Text style={[styles.descripcionTxt, isDark && styles.valueDark]}>{descripcion}</Text>
-              </>
-            ) : null}
-
             <Text style={styles.label}>📅 Fecha</Text>
             <Text style={[styles.value, isDark && styles.valueDark]}>{fechaFormateada}</Text>
 
@@ -487,8 +482,32 @@ export default function PantallaDetalle() {
 
             <Text style={styles.label}>🎪 Lugar</Text>
             <Text style={[styles.value, isDark && styles.valueDark]}>{nombre} ({concejo})</Text>
-            <Text style={styles.label}>🎵 Música</Text>
-            <Text style={[styles.value, isDark && styles.valueDark]}>{orquesta || 'Por confirmar'}</Text>
+            {dias && dias.length > 0 ? (
+              <View style={styles.programaContainer}>
+                <Text style={styles.label}>🗓️ Programa</Text>
+                {dias.map(dia => (
+                  <View key={dia.fecha} style={[styles.programaDia, isDark && styles.programaDiaDark]}>
+                    <Text style={[styles.programaFecha, { color: isDark ? '#86efac' : '#166534' }]}>
+                      {new Date(dia.fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })}
+                    </Text>
+                    {dia.orquesta ? <Text style={[styles.programaLinea, isDark && styles.valueDark]}>🎵 {dia.orquesta}</Text> : null}
+                    {dia.dj ? <Text style={[styles.programaLinea, isDark && styles.valueDark]}>🎧 {dia.dj}</Text> : null}
+                    {!dia.orquesta && !dia.dj ? <Text style={[styles.programaLinea, { color: '#94a3b8' }]}>Por confirmar</Text> : null}
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <>
+                <Text style={styles.label}>🎵 Orquesta</Text>
+                <Text style={[styles.value, isDark && styles.valueDark]}>{orquesta || 'Por confirmar'}</Text>
+                {dj ? (
+                  <>
+                    <Text style={styles.label}>🎧 DJ</Text>
+                    <Text style={[styles.value, isDark && styles.valueDark]}>{dj}</Text>
+                  </>
+                ) : null}
+              </>
+            )}
 
             <View style={styles.asistenciaContainer}>
               <TouchableOpacity
@@ -727,7 +746,6 @@ export default function PantallaDetalle() {
             <View style={styles.tarjetaCard}>
               <View style={styles.tarjetaHeader}>
                 <Text style={styles.tarjetaApp}>🎪 Folixa</Text>
-                {categoria ? <Text style={styles.tarjetaCategoria}>{categoria}</Text> : null}
               </View>
               <Text style={styles.tarjetaNombre}>{nombre}</Text>
               <View style={styles.tarjetaSeparador} />
@@ -736,6 +754,7 @@ export default function PantallaDetalle() {
               </Text>
               <Text style={styles.tarjetaConcejo}>📍 {concejo}</Text>
               {orquesta ? <Text style={styles.tarjetaOrquesta}>🎵 {orquesta}</Text> : null}
+              {dj ? <Text style={styles.tarjetaOrquesta}>🎧 {dj}</Text> : null}
               {valoracionMedia !== null && numValoraciones > 0 ? (
                 <Text style={styles.tarjetaRating}>⭐ {valoracionMedia.toFixed(1)} ({numValoraciones} valoraciones)</Text>
               ) : null}
@@ -792,14 +811,11 @@ const styles = StyleSheet.create({
   etiquetaAmpliar: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 8, borderRadius: 10 },
   textoAmpliar: { color: 'white', fontSize: 12, fontWeight: 'bold' },
   textoContainer: { padding: 20 },
-  categoriaBadge: {
-    alignSelf: 'flex-start', backgroundColor: '#dcfce7', borderRadius: 12,
-    paddingHorizontal: 12, paddingVertical: 5, marginTop: 12,
-    borderWidth: 1, borderColor: '#86efac',
-  },
-  categoriaBadgeDark: { backgroundColor: '#14532d', borderColor: '#166534' },
-  categoriaBadgeTxt: { fontSize: 13, fontWeight: '700', color: '#15803d' },
-  descripcionTxt: { fontSize: 15, color: '#334155', marginTop: 4, lineHeight: 22 },
+  programaContainer: { marginTop: 4 },
+  programaDia: { backgroundColor: '#f0fdf4', borderRadius: 10, padding: 12, marginTop: 8, borderLeftWidth: 3, borderLeftColor: '#166534' },
+  programaDiaDark: { backgroundColor: '#14532d' },
+  programaFecha: { fontWeight: 'bold', fontSize: 13, marginBottom: 4, textTransform: 'capitalize' },
+  programaLinea: { fontSize: 15, color: '#1e293b', marginTop: 2 },
   btnEntradas: {
     backgroundColor: '#7c3aed', padding: 16, borderRadius: 15,
     alignItems: 'center', marginTop: 20,
@@ -864,10 +880,6 @@ const styles = StyleSheet.create({
   },
   tarjetaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
   tarjetaApp: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: 'bold' },
-  tarjetaCategoria: {
-    backgroundColor: 'rgba(255,255,255,0.2)', color: 'white',
-    fontSize: 12, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
-  },
   tarjetaNombre: { color: 'white', fontSize: 26, fontWeight: 'bold', lineHeight: 32, marginBottom: 16 },
   tarjetaSeparador: { height: 1, backgroundColor: 'rgba(255,255,255,0.25)', marginBottom: 16 },
   tarjetaFecha: { color: 'rgba(255,255,255,0.9)', fontSize: 15, marginBottom: 8, textTransform: 'capitalize' },
