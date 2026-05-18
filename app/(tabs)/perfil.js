@@ -256,7 +256,7 @@ export default function PantallaPerfil() {
               {subiendoBanner && <ActivityIndicator color="white" size="large" style={StyleSheet.absoluteFill} />}
             </ImageBackground>
           </TouchableOpacity>
-          {(userProfile?.isAdmin === true || userProfile?.isAdmin === 'true') && (
+          {userProfile?.isAdmin === true && (
             <TouchableOpacity style={styles.btnAdmin} onPress={() => router.push('/admin')}>
               <Text style={styles.btnAdminTxt}>⚙️</Text>
             </TouchableOpacity>

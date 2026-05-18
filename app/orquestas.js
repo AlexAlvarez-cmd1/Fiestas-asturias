@@ -56,6 +56,9 @@ export default function PantallaOrquestas() {
       fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
       latitud: fiesta.ubicacion?.latitude, longitud: fiesta.ubicacion?.longitude,
       esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
+      descripcion: fiesta.descripcion || '',
+      categoria: fiesta.categoria || '',
+      linkEntradas: fiesta.linkEntradas || '',
     },
   });
 
@@ -98,7 +101,7 @@ export default function PantallaOrquestas() {
           <View style={styles.fiestasList}>
             {item.fiestas.map(fiesta => {
               const fecha = new Date(fiesta.fecha).toLocaleDateString('es-ES', {
-                day: 'numeric', month: 'short',
+                day: 'numeric', month: 'short', year: 'numeric',
               });
               return (
                 <TouchableOpacity
@@ -115,6 +118,11 @@ export default function PantallaOrquestas() {
                       {fiesta.nombre}
                     </Text>
                     <Text style={[styles.fiestaLoc, isDark && styles.subDark]}>📍 {fiesta.concejo}</Text>
+                    {fiesta.numValoraciones > 0 && (
+                      <Text style={styles.fiestaRating}>
+                        ⭐ {(fiesta.valoracionTotal / fiesta.numValoraciones).toFixed(1)}
+                      </Text>
+                    )}
                   </View>
                   <Text style={[styles.arrow, isDark && styles.subDark]}>›</Text>
                 </TouchableOpacity>
@@ -241,6 +249,7 @@ const styles = StyleSheet.create({
   fechaTxt: { fontSize: 11, fontWeight: 'bold' },
   fiestaName: { fontSize: 14, fontWeight: '600', color: '#1e293b' },
   fiestaLoc: { fontSize: 12, color: '#64748b', marginTop: 1 },
+  fiestaRating: { fontSize: 11, color: '#f59e0b', fontWeight: '700', marginTop: 2 },
   arrow: { fontSize: 20, color: '#cbd5e1' },
 
   textDark: { color: '#f1f1f1' },

@@ -25,7 +25,7 @@ export default function AdminPanel() {
   const [cargandoUsers, setCargandoUsers] = useState(false);
   const [toggling, setToggling] = useState(null); // uid en proceso
 
-  const esAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
+  const esAdmin = userProfile?.isAdmin === true;
 
   useEffect(() => { cargarFiestas(); }, []);
 
@@ -97,12 +97,12 @@ export default function AdminPanel() {
   };
 
   const toggleAdmin = async (usuario) => {
-    const nuevoValor = !(usuario.isAdmin === true || usuario.isAdmin === 'true');
+    const nuevoValor = !(usuario.isAdmin === true);
     setToggling(usuario.id);
     try {
-      await updateDoc(doc(db, 'users', usuario.id), { isAdmin: nuevoValor ? 'true' : 'false' });
+      await updateDoc(doc(db, 'users', usuario.id), { isAdmin: nuevoValor });
       setUsuarios(prev =>
-        prev.map(u => u.id === usuario.id ? { ...u, isAdmin: nuevoValor ? 'true' : 'false' } : u)
+        prev.map(u => u.id === usuario.id ? { ...u, isAdmin: nuevoValor } : u)
       );
     } catch {
       Alert.alert('Error', 'No se pudieron cambiar los permisos.');
@@ -262,7 +262,7 @@ export default function AdminPanel() {
           )}
 
           {usuarios.map(u => {
-            const esAdminUser = u.isAdmin === true || u.isAdmin === 'true';
+            const esAdminUser = u.isAdmin === true;
             const esMismoUser = u.id === userProfile?.uid;
             return (
               <View key={u.id} style={styles.userRow}>

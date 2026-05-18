@@ -50,14 +50,20 @@ service cloud.firestore {
 
       // Update tiene dos niveles:
       //   1. Admins pueden actualizar cualquier campo
-      //   2. Usuarios autenticados SOLO pueden tocar 'vistas' y 'asistentes'
-      //      (contador de visitas y asistencia). Nada más.
+      //   2. Usuarios autenticados SOLO pueden tocar campos de contador.
       allow update: if (isAdmin() && fiestaValida(request.resource.data)) || (
         isSignedIn() &&
         request.resource.data.diff(resource.data)
           .affectedKeys()
-          .hasOnly(['vistas', 'asistentes'])
+          .hasOnly(['vistas', 'asistentes', 'valoracionTotal', 'numValoraciones'])
       );
+
+      // ── Valoraciones (subcolección de cada fiesta) ──────────────────────
+      match /valoraciones/{userId} {
+        allow read: if isSignedIn();
+        // Cada usuario solo puede escribir su propia valoración
+        allow write: if isSignedIn() && request.auth.uid == userId;
+      }
 
       // ── Fotos (subcolección de cada fiesta) ──────────────────────────────
       match /fotos/{fotoId} {

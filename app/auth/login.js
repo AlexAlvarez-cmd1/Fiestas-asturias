@@ -20,7 +20,7 @@ export default function Login() {
       router.replace('/(tabs)');
     } catch (error) {
       console.error('Error login:', error.code, error.message);
-      Alert.alert('Error al entrar', `${traducirError(error.code)}\n\nCódigo: ${error.code || error.message}`);
+      Alert.alert('Error al entrar', traducirError(error.code));
     } finally {
       setCargando(false);
     }
@@ -84,8 +84,8 @@ export default function Login() {
 
 function traducirError(code) {
   const errores = {
-    'auth/user-not-found': 'No existe ninguna cuenta con ese email.',
-    'auth/wrong-password': 'Contraseña incorrecta.',
+    'auth/user-not-found': 'Email o contraseña incorrectos.',
+    'auth/wrong-password': 'Email o contraseña incorrectos.',
     'auth/invalid-email': 'El email no es válido.',
     'auth/too-many-requests': 'Demasiados intentos. Espera un momento.',
     'auth/invalid-credential': 'Email o contraseña incorrectos. Si no tienes cuenta, regístrate.',

@@ -1,5 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { useCallback, useMemo, useState } from 'react';
 import {
@@ -46,6 +46,9 @@ export default function PantallaLista() {
   const [amigosEnFiestas, setAmigosEnFiestas] = useState({});
   const [misAsistencias, setMisAsistencias] = useState([]);
   const [filtroSemana, setFiltroSemana] = useState(null); // null | 'esta' | 'proxima'
+  const [filtroCategoria, setFiltroCategoria] = useState('');
+
+  const CATEGORIAS = ['Romería', 'Verbena', 'Festival', 'Carnaval', 'Feria', 'Otro'];
 
   const cargar = async (isRefresh = false) => {
     if (!isRefresh) {
@@ -56,7 +59,14 @@ export default function PantallaLista() {
       }
     }
     try {
-      const querySnapshot = await getDocs(collection(db, 'fiestas'));
+      const hoyStr = new Date().toISOString().split('T')[0];
+      const q = query(
+        collection(db, 'fiestas'),
+        where('fecha', '>=', hoyStr),
+        orderBy('fecha'),
+        limit(150)
+      );
+      const querySnapshot = await getDocs(q);
       const data = querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
       setFiestas(data);
       if (data.length > 0) await cacheService.setCachedFiestas(data);
@@ -101,16 +111,14 @@ export default function PantallaLista() {
     return Array.from(set).sort();
   }, [fiestas]);
 
-  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos, filtroSemana].filter(Boolean).length;
+  const filtrosActivos = [filtroConcejo, filtroOrquesta.trim(), soloFavoritos, filtroSemana, filtroCategoria].filter(Boolean).length;
 
   const fiestasFiltradas = fiestas
     .filter(f => {
       if (!f.fecha) return false;
-      const fechaFiesta = new Date(f.fecha);
-      fechaFiesta.setHours(0, 0, 0, 0);
-      if (fechaFiesta < hoy) return false;
       if (soloFavoritos && !favoritosIds.includes(f.id)) return false;
       if (filtroConcejo && f.concejo !== filtroConcejo) return false;
+      if (filtroCategoria && f.categoria !== filtroCategoria) return false;
       if (filtroOrquesta.trim() && !norm(f.orquesta).includes(norm(filtroOrquesta))) return false;
       if (filtroSemana) {
         const fin = new Date(hoy);
@@ -130,7 +138,7 @@ export default function PantallaLista() {
       }
       return true;
     })
-    .sort((a, b) => new Date(a.fecha) - new Date(b.fecha));
+    ;
 
   // ─── Calendar helpers ──────────────────────────────────────────────────────
 
@@ -178,6 +186,9 @@ export default function PantallaLista() {
       fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
       latitud: fiesta.ubicacion?.latitude, longitud: fiesta.ubicacion?.longitude,
       esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
+      descripcion: fiesta.descripcion || '',
+      categoria: fiesta.categoria || '',
+      linkEntradas: fiesta.linkEntradas || '',
     },
   });
 
@@ -185,7 +196,7 @@ export default function PantallaLista() {
 
   const renderFiesta = ({ item: fiesta }) => {
     const fecha = new Date(fiesta.fecha).toLocaleDateString('es-ES', {
-      weekday: 'short', day: 'numeric', month: 'long',
+      weekday: 'short', day: 'numeric', month: 'short', year: 'numeric',
     });
     return (
       <TouchableOpacity
@@ -199,15 +210,26 @@ export default function PantallaLista() {
         <View style={styles.cardContent}>
           <Text style={styles.emojiText}>{emojiFiesta}</Text>
           <View style={styles.textoContainer}>
-            <Text style={[styles.nombre, isDark && styles.textDark]} numberOfLines={1}>
-              {fiesta.nombre}
-            </Text>
+            <View style={styles.nombreRow}>
+              <Text style={[styles.nombre, isDark && styles.textDark, { flex: 1 }]} numberOfLines={1}>
+                {fiesta.nombre}
+              </Text>
+              {fiesta.categoria ? (
+                <Text style={styles.categoriaTag}>{fiesta.categoria}</Text>
+              ) : null}
+            </View>
             <Text style={[styles.concejo, isDark && styles.subTextDark]}>📍 {fiesta.concejo}</Text>
             {fiesta.orquesta ? (
               <Text style={[styles.orquesta, isDark && styles.subTextDark]} numberOfLines={1}>
                 🎵 {fiesta.orquesta}
               </Text>
             ) : null}
+            {fiesta.numValoraciones > 0 && (
+              <Text style={styles.ratingTxt}>
+                ⭐ {(fiesta.valoracionTotal / fiesta.numValoraciones).toFixed(1)}
+                <Text style={{ fontSize: 11, color: '#94a3b8' }}> ({fiesta.numValoraciones})</Text>
+              </Text>
+            )}
             <View style={styles.badgesRow}>
               {misAsistencias.includes(fiesta.id) && (
                 <View style={styles.badgeVas}>
@@ -511,6 +533,25 @@ export default function PantallaLista() {
             ))}
           </ScrollView>
 
+          <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🏷️ Categoría</Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.chipsRow}>
+            <TouchableOpacity
+              style={[styles.chip, !filtroCategoria && { backgroundColor: primaryColor }]}
+              onPress={() => setFiltroCategoria('')}
+            >
+              <Text style={[styles.chipTxt, !filtroCategoria && { color: textColor }]}>Todas</Text>
+            </TouchableOpacity>
+            {CATEGORIAS.map(cat => (
+              <TouchableOpacity
+                key={cat}
+                style={[styles.chip, filtroCategoria === cat && { backgroundColor: primaryColor }]}
+                onPress={() => setFiltroCategoria(filtroCategoria === cat ? '' : cat)}
+              >
+                <Text style={[styles.chipTxt, filtroCategoria === cat && { color: textColor }]}>{cat}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
           <Text style={[styles.filtroLabel, isDark && styles.textDark, { marginTop: 16, marginBottom: 8 }]}>🎵 Orquesta</Text>
           <TextInput
             style={[styles.filtroInput, isDark && styles.filtroInputDark]}
@@ -523,7 +564,7 @@ export default function PantallaLista() {
           <View style={styles.filtrosBtns}>
             <TouchableOpacity
               style={[styles.btnLimpiar, isDark && styles.btnLimpiarDark]}
-              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); setFiltroSemana(null); }}
+              onPress={() => { setFiltroConcejo(''); setFiltroOrquesta(''); setSoloFavoritos(false); setFiltroSemana(null); setFiltroCategoria(''); }}
             >
               <Text style={[styles.btnLimpiarTxt, isDark && styles.subTextDark]}>Limpiar</Text>
             </TouchableOpacity>
@@ -656,12 +697,19 @@ const styles = StyleSheet.create({
   cardContent: { flexDirection: 'row', alignItems: 'center', padding: 15, gap: 12 },
   emojiText: { fontSize: 32 },
   textoContainer: { flex: 1 },
+  nombreRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   nombre: { fontSize: 17, fontWeight: 'bold', color: '#1e293b' },
+  categoriaTag: {
+    fontSize: 11, fontWeight: '700', color: '#166534',
+    backgroundColor: '#dcfce7', paddingHorizontal: 7, paddingVertical: 2,
+    borderRadius: 8, overflow: 'hidden',
+  },
   textDark: { color: '#f1f1f1' },
   concejo: { color: '#64748b', fontSize: 14, marginTop: 3 },
   orquesta: { color: '#64748b', fontSize: 13, marginTop: 2 },
   subTextDark: { color: '#aaa' },
   flecha: { fontSize: 28, color: '#cbd5e1', fontWeight: '300' },
+  ratingTxt: { fontSize: 13, color: '#f59e0b', fontWeight: '700', marginTop: 3 },
   badgesRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 5 },
   badgeVas: {
     backgroundColor: '#dcfce7', borderRadius: 10,

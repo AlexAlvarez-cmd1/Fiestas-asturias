@@ -1,7 +1,9 @@
+import * as ImageManipulator from 'expo-image-manipulator';
 import * as ImagePicker from 'expo-image-picker';
 import { Stack, useLocalSearchParams, useRouter } from 'expo-router';
-import { deleteDoc, doc, increment, onSnapshot, updateDoc } from 'firebase/firestore';
-import { useEffect, useState } from 'react';
+import { deleteDoc, doc, getDoc, increment, onSnapshot, updateDoc } from 'firebase/firestore';
+import ViewShot from 'react-native-view-shot';
+import { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, FlatList, Image, Linking, Modal, ScrollView, Share, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import ImageModal from '../components/ImageModal';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -12,14 +14,20 @@ import { useFavorite } from '../hooks/useFavorite';
 import { fotosService } from '../services/fotosService';
 import { weatherService } from '../services/weatherService';
 import { notificationService } from '../services/notificationService';
+import * as Sharing from 'expo-sharing';
+import { analyticsService } from '../services/analyticsService';
+import { ratingService } from '../services/ratingService';
 import { storageService } from '../services/storageService';
 import { userService } from '../services/userService';
 
 export default function PantallaDetalle() {
   const router = useRouter();
-  const params = useLocalSearchParams();
-  
-  const { id, nombre, concejo, orquesta, imagen, latitud, longitud, fecha, linkVersity, esVersity } = params;
+  const rawParams = useLocalSearchParams();
+  const [fiestaData, setFiestaData] = useState(rawParams);
+  const { id, nombre, concejo, orquesta, imagen, latitud, longitud, fecha, linkVersity, esVersity, descripcion, categoria, linkEntradas } = fiestaData;
+  const shareCardRef = useRef(null);
+  const [modalTarjeta, setModalTarjeta] = useState(false);
+  const [capturando, setCapturando] = useState(false);
   
   const { user, userProfile } = useAuth();
 
@@ -40,12 +48,18 @@ export default function PantallaDetalle() {
   const [modalAsistentes, setModalAsistentes] = useState(false);
   const [asistentes, setAsistentes] = useState([]);
   const [cargandoAsistentes, setCargandoAsistentes] = useState(false);
+
+  // Valoraciones
+  const [miValoracion, setMiValoracion] = useState(null);
+  const [valoracionMedia, setValoracionMedia] = useState(null);
+  const [numValoraciones, setNumValoraciones] = useState(0);
+  const [guardandoValoracion, setGuardandoValoracion] = useState(false);
   
   // Hook para favoritos
   const { isFavorite, toggleFavorite, loading: loadingFavorite } = useFavorite(id);
   const { theme, primaryColor, textColor } = useConfig();
   const isDark = theme === 'dark';
-  const esAdmin = userProfile?.isAdmin === true || userProfile?.isAdmin === 'true';
+  const esAdmin = userProfile?.isAdmin === true;
 
   const handleToggleFavorite = async () => {
     const eraFavorito = isFavorite;
@@ -68,9 +82,18 @@ export default function PantallaDetalle() {
     }
   };
 
+  // Deep link: si solo llega el id (desde notificación o URL externa), cargamos de Firestore
+  useEffect(() => {
+    if (!id || nombre) return;
+    getDoc(doc(db, 'fiestas', id)).then(snap => {
+      if (snap.exists()) setFiestaData({ id: snap.id, ...snap.data() });
+    }).catch(() => {});
+  }, [id]);
+
   useEffect(() => {
     if (!id) return;
     updateDoc(doc(db, 'fiestas', id), { vistas: increment(1) }).catch(() => {});
+    analyticsService.fiestaView(id, nombre);
     cargarFotos();
     if (latitud && longitud && fecha) {
       weatherService.getForecast(latitud, longitud, fecha).then(setWeather);
@@ -146,8 +169,13 @@ export default function PantallaDetalle() {
   const subirImagen = async (uri) => {
     setSubiendoFoto(true);
     try {
+      const compressed = await ImageManipulator.manipulateAsync(
+        uri,
+        [{ resize: { width: 1080 } }],
+        { compress: 0.75, format: ImageManipulator.SaveFormat.JPEG }
+      );
       const username = userProfile?.username || user.email.split('@')[0];
-      await fotosService.uploadFoto(id, uri, user.uid, username);
+      await fotosService.uploadFoto(id, compressed.uri, user.uid, username);
       await cargarFotos();
       userService.updateProfile(user.uid, { numFotos: (userProfile?.numFotos || 0) + 1 }).catch(() => {});
     } catch (e) {
@@ -160,27 +188,38 @@ export default function PantallaDetalle() {
 
   const buildTextoCompartir = () => {
     const fechaStr = fecha
-      ? new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long' })
+      ? new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
       : '';
     return `🎪 ${nombre}\n📅 ${fechaStr}\n📍 ${concejo}${orquesta ? `\n🎵 ${orquesta}` : ''}\n\n¡Descarga Folixa para descubrir más fiestas en Asturias! 🍺`;
   };
 
-  const compartirWhatsApp = async () => {
-    const texto = buildTextoCompartir();
+  const compartirImagen = async () => {
+    setCapturando(true);
     try {
-      await Linking.openURL(`whatsapp://send?text=${encodeURIComponent(texto)}`);
-    } catch {
-      await Share.share({ message: texto, title: nombre });
+      const uri = await shareCardRef.current.capture();
+      const disponible = await Sharing.isAvailableAsync();
+      if (disponible) {
+        await Sharing.shareAsync(uri, { mimeType: 'image/png', dialogTitle: 'Compartir fiesta' });
+      } else {
+        await Share.share({ url: uri });
+      }
+      analyticsService.fiestaShare(id);
+    } catch (e) {
+      console.warn('Error compartiendo imagen:', e);
+    } finally {
+      setCapturando(false);
     }
   };
 
-  const compartirNativo = async () => {
+  const compartirTexto = async () => {
     try {
       await Share.share({ message: buildTextoCompartir(), title: nombre });
-    } catch (error) {
-      console.warn('Error compartiendo:', error);
+      analyticsService.fiestaShare(id);
+    } catch (e) {
+      console.warn('Error compartiendo texto:', e);
     }
   };
+
 
   useEffect(() => {
     if (!id) return;
@@ -197,9 +236,16 @@ export default function PantallaDetalle() {
         if (docSnap.exists()) {
           const data = docSnap.data();
           setAsistentesCount(data.asistentes || 0);
+          const n = data.numValoraciones || 0;
+          setNumValoraciones(n);
+          setValoracionMedia(n > 0 ? (data.valoracionTotal || 0) / n : null);
         }
         setLoadingAttendance(false);
       });
+
+      if (user) {
+        ratingService.getUserRating(id, user.uid).then(setMiValoracion);
+      }
     };
 
     loadAttendance();
@@ -220,6 +266,7 @@ export default function PantallaDetalle() {
         await storageService.setItem(`attended_${id}`, 'true');
         await updateDoc(fiestaRef, { asistentes: increment(1) });
         if (user) await userService.updateAsistencia(user.uid, id, true);
+        analyticsService.fiestaAttend(id);
         try {
           const notifIds = await notificationService.scheduleAllRemindersForFiesta?.({ id, nombre, fecha, concejo });
           if (notifIds?.length) await storageService.setItem(`reminder_attended_${id}`, JSON.stringify(notifIds));
@@ -277,12 +324,28 @@ export default function PantallaDetalle() {
       "¿Con qué app quieres ir?",
       "Selecciona tu aplicación de mapas favorita",
       [
-        { text: "Google Maps", onPress: () => Linking.openURL(`http://maps.google.com/?daddr=${lat},${lon}&travelmode=driving`) },
-        { text: "Apple Maps", onPress: () => Linking.openURL(`http://maps.apple.com/?daddr=${lat},${lon}&dirflg=d`) },
+        { text: "Google Maps", onPress: () => Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lon}&travelmode=driving`) },
+        { text: "Apple Maps", onPress: () => Linking.openURL(`https://maps.apple.com/?daddr=${lat},${lon}&dirflg=d`) },
         { text: "Waze", onPress: () => Linking.openURL(`https://www.waze.com/ul?ll=${lat},${lon}&navigate=yes`) },
         { text: "Cancelar", style: "cancel" }
       ]
     );
+  };
+
+  const votar = async (valor) => {
+    if (!user || guardandoValoracion) return;
+    setGuardandoValoracion(true);
+    const prev = miValoracion;
+    setMiValoracion(valor);
+    try {
+      await ratingService.setRating(id, user.uid, valor, prev);
+      analyticsService.fiestaRate(id, valor);
+    } catch (e) {
+      console.error('❌ Error guardando valoración:', e?.code, e?.message);
+      setMiValoracion(prev);
+    } finally {
+      setGuardandoValoracion(false);
+    }
   };
 
   const verAsistentes = async () => {
@@ -391,6 +454,19 @@ export default function PantallaDetalle() {
         {/* CONTENIDO SEGÚN TAB */}
         {tabDetalle === 'info' ? (
           <View style={[styles.tabContent, isDark && styles.tabContentDark]}>
+            {categoria ? (
+              <View style={[styles.categoriaBadge, isDark && styles.categoriaBadgeDark]}>
+                <Text style={[styles.categoriaBadgeTxt, isDark && { color: '#86efac' }]}>{categoria}</Text>
+              </View>
+            ) : null}
+
+            {descripcion ? (
+              <>
+                <Text style={styles.label}>📝 Descripción</Text>
+                <Text style={[styles.descripcionTxt, isDark && styles.valueDark]}>{descripcion}</Text>
+              </>
+            ) : null}
+
             <Text style={styles.label}>📅 Fecha</Text>
             <Text style={[styles.value, isDark && styles.valueDark]}>{fechaFormateada}</Text>
 
@@ -440,6 +516,37 @@ export default function PantallaDetalle() {
               </TouchableOpacity>
             </View>
 
+            <View style={[styles.valoracionCard, isDark && styles.valoracionCardDark]}>
+              <View style={styles.valoracionHeader}>
+                <Text style={[styles.valoracionTitulo, isDark && styles.valueDark]}>
+                  ⭐ Valoración
+                </Text>
+                {valoracionMedia !== null && (
+                  <Text style={styles.valoracionMedia}>
+                    {valoracionMedia.toFixed(1)} <Text style={styles.valoracionCount}>({numValoraciones})</Text>
+                  </Text>
+                )}
+              </View>
+              {user ? (
+                <View style={styles.estrellas}>
+                  {[1, 2, 3, 4, 5].map(n => (
+                    <TouchableOpacity key={n} onPress={() => votar(n)} disabled={guardandoValoracion} activeOpacity={0.7}>
+                      <Text style={[styles.estrella, miValoracion >= n && styles.estrellaActiva]}>
+                        {miValoracion >= n ? '★' : '☆'}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                  {miValoracion && (
+                    <Text style={styles.valoracionTuNota}>Tu nota: {miValoracion}/5</Text>
+                  )}
+                </View>
+              ) : (
+                <Text style={[styles.valoracionLogin, isDark && { color: '#94a3b8' }]}>
+                  Inicia sesión para valorar
+                </Text>
+              )}
+            </View>
+
             <Text style={styles.labelRuta}>¿CÓMO LLEGAMOS A LA FOLIXA?</Text>
             <View style={styles.gridTransporte}>
               <TouchableOpacity style={[styles.btnOpcion, styles.btnCoche]} onPress={seleccionarAppMapa}>
@@ -468,15 +575,18 @@ export default function PantallaDetalle() {
               )}
             </View>
 
-            <TouchableOpacity style={styles.btnWhatsapp} onPress={compartirWhatsApp}>
-              <Text style={styles.btnTextoWhatsapp}>💬 COMPARTIR EN WHATSAPP</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.btnCompartir} onPress={compartirNativo}>
-              <Text style={styles.btnTextoCompartir}>📤 Compartir en otras apps</Text>
+            {linkEntradas ? (
+              <TouchableOpacity style={styles.btnEntradas} onPress={() => Linking.openURL(linkEntradas)}>
+                <Text style={styles.btnTextoEntradas}>🎟️ COMPRAR ENTRADAS</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity style={styles.btnCompartir} onPress={() => setModalTarjeta(true)}>
+              <Text style={styles.btnTextoCompartir}>📤 Compartir esta folixa</Text>
             </TouchableOpacity>
             {esAdmin && (
               <>
-                <TouchableOpacity style={styles.btnEditar} onPress={() => router.push({ pathname: '/editar', params: params })}>
+                <TouchableOpacity style={styles.btnEditar} onPress={() => router.push({ pathname: '/editar', params: fiestaData })}>
                   <Text style={styles.btnTextoEditar}>📝 EDITAR FIESTA</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.botonEliminar} onPress={manejarEliminacion} disabled={cargandoEliminar}>
@@ -609,6 +719,63 @@ export default function PantallaDetalle() {
         onClose={() => setModalVisible(false)}
         imageUrl={imagen}
       />
+
+      {/* MODAL TARJETA VISUAL */}
+      <Modal visible={modalTarjeta} transparent animationType="fade" onRequestClose={() => setModalTarjeta(false)}>
+        <View style={styles.tarjetaFondo}>
+          <ViewShot ref={shareCardRef} options={{ format: 'png', quality: 1 }}>
+            <View style={styles.tarjetaCard}>
+              <View style={styles.tarjetaHeader}>
+                <Text style={styles.tarjetaApp}>🎪 Folixa</Text>
+                {categoria ? <Text style={styles.tarjetaCategoria}>{categoria}</Text> : null}
+              </View>
+              <Text style={styles.tarjetaNombre}>{nombre}</Text>
+              <View style={styles.tarjetaSeparador} />
+              <Text style={styles.tarjetaFecha}>
+                📅 {fecha ? new Date(fecha).toLocaleDateString('es-ES', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }) : ''}
+              </Text>
+              <Text style={styles.tarjetaConcejo}>📍 {concejo}</Text>
+              {orquesta ? <Text style={styles.tarjetaOrquesta}>🎵 {orquesta}</Text> : null}
+              {valoracionMedia !== null && numValoraciones > 0 ? (
+                <Text style={styles.tarjetaRating}>⭐ {valoracionMedia.toFixed(1)} ({numValoraciones} valoraciones)</Text>
+              ) : null}
+              <View style={styles.tarjetaFooter}>
+                <Text style={styles.tarjetaFooterTxt}>Descarga Folixa — fiestas de Asturias</Text>
+              </View>
+            </View>
+          </ViewShot>
+
+          <View style={styles.tarjetaBtns}>
+            <TouchableOpacity
+              style={[styles.btnCapturar, capturando && { opacity: 0.6 }]}
+              onPress={compartirImagen}
+              disabled={capturando}
+            >
+              {capturando
+                ? <ActivityIndicator color="white" />
+                : (
+                  <View>
+                    <Text style={styles.btnCapturarTxt}>🖼️ Compartir imagen</Text>
+                    <Text style={styles.btnCapturarSub}>Instagram Stories, WhatsApp, etc.</Text>
+                  </View>
+                )
+              }
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.btnCompartirTextoModal}
+              onPress={async () => { await compartirTexto(); setModalTarjeta(false); }}
+            >
+              <View>
+                <Text style={styles.btnCompartirTextoModalTxt}>💬 Compartir texto</Text>
+                <Text style={styles.btnCompartirTextoModalSub}>WhatsApp, SMS, email…</Text>
+              </View>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.btnCerrarTarjeta} onPress={() => setModalTarjeta(false)}>
+              <Text style={styles.btnCerrarTarjetaTxt}>Cancelar</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -625,8 +792,35 @@ const styles = StyleSheet.create({
   etiquetaAmpliar: { position: 'absolute', bottom: 10, right: 10, backgroundColor: 'rgba(0,0,0,0.6)', padding: 8, borderRadius: 10 },
   textoAmpliar: { color: 'white', fontSize: 12, fontWeight: 'bold' },
   textoContainer: { padding: 20 },
+  categoriaBadge: {
+    alignSelf: 'flex-start', backgroundColor: '#dcfce7', borderRadius: 12,
+    paddingHorizontal: 12, paddingVertical: 5, marginTop: 12,
+    borderWidth: 1, borderColor: '#86efac',
+  },
+  categoriaBadgeDark: { backgroundColor: '#14532d', borderColor: '#166534' },
+  categoriaBadgeTxt: { fontSize: 13, fontWeight: '700', color: '#15803d' },
+  descripcionTxt: { fontSize: 15, color: '#334155', marginTop: 4, lineHeight: 22 },
+  btnEntradas: {
+    backgroundColor: '#7c3aed', padding: 16, borderRadius: 15,
+    alignItems: 'center', marginTop: 20,
+  },
+  btnTextoEntradas: { color: 'white', fontWeight: 'bold', fontSize: 15, letterSpacing: 0.5 },
   label: { fontSize: 12, color: '#94a3b8', fontWeight: 'bold', marginTop: 15, textTransform: 'uppercase' },
   value: { fontSize: 18, fontWeight: 'bold', color: '#1e293b', marginTop: 2 },
+  valoracionCard: {
+    marginTop: 20, backgroundColor: '#f8fafc', borderRadius: 16,
+    padding: 16, borderWidth: 1, borderColor: '#e2e8f0',
+  },
+  valoracionCardDark: { backgroundColor: '#1a2332', borderColor: '#2d3748' },
+  valoracionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  valoracionTitulo: { fontSize: 14, fontWeight: '700', color: '#475569' },
+  valoracionMedia: { fontSize: 18, fontWeight: 'bold', color: '#f59e0b' },
+  valoracionCount: { fontSize: 12, color: '#94a3b8', fontWeight: 'normal' },
+  estrellas: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  estrella: { fontSize: 32, color: '#d1d5db' },
+  estrellaActiva: { color: '#f59e0b' },
+  valoracionTuNota: { fontSize: 12, color: '#94a3b8', marginLeft: 8 },
+  valoracionLogin: { fontSize: 13, color: '#94a3b8', fontStyle: 'italic' },
   labelRuta: { fontSize: 14, fontWeight: '900', marginTop: 30, textAlign: 'center', color: '#166534', letterSpacing: 1 },
   asistenciaContainer: { flexDirection: 'row', alignItems: 'center', marginTop: 25, backgroundColor: '#f8fafc', padding: 15, borderRadius: 15, borderWidth: 1, borderColor: '#e2e8f0' },
   btnAsistir: { backgroundColor: 'white', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 12, borderWidth: 2, borderColor: '#3b82f6', elevation: 2, shadowColor: '#3b82f6', shadowOpacity: 0.2, shadowRadius: 3, shadowOffset: {width:0, height:2} },
@@ -655,10 +849,43 @@ const styles = StyleSheet.create({
   weatherTemp: { fontSize: 13, color: '#64748b', marginTop: 2 },
   weatherRainBadge: { backgroundColor: '#dbeafe', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 10 },
   weatherRainTxt: { fontSize: 12, color: '#1d4ed8', fontWeight: '600' },
-  btnWhatsapp: { backgroundColor: '#25D366', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 20 },
-  btnTextoWhatsapp: { color: 'white', fontWeight: 'bold' },
-  btnCompartir: { backgroundColor: '#dbeafe', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 10 },
-  btnTextoCompartir: { color: '#1d4ed8', fontWeight: 'bold' },
+  btnCompartirTextoModal: {
+    backgroundColor: 'rgba(255,255,255,0.12)', padding: 16,
+    borderRadius: 14, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
+  },
+  btnCompartirTextoModalTxt: { color: 'white', fontWeight: 'bold', fontSize: 15, textAlign: 'center' },
+  btnCompartirTextoModalSub: { color: 'rgba(255,255,255,0.55)', fontSize: 12, textAlign: 'center', marginTop: 2 },
+
+  tarjetaFondo: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center', padding: 24 },
+  tarjetaCard: {
+    backgroundColor: '#166534', borderRadius: 24, padding: 28, width: 320,
+    shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, elevation: 20,
+  },
+  tarjetaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
+  tarjetaApp: { color: 'rgba(255,255,255,0.9)', fontSize: 16, fontWeight: 'bold' },
+  tarjetaCategoria: {
+    backgroundColor: 'rgba(255,255,255,0.2)', color: 'white',
+    fontSize: 12, fontWeight: '700', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12,
+  },
+  tarjetaNombre: { color: 'white', fontSize: 26, fontWeight: 'bold', lineHeight: 32, marginBottom: 16 },
+  tarjetaSeparador: { height: 1, backgroundColor: 'rgba(255,255,255,0.25)', marginBottom: 16 },
+  tarjetaFecha: { color: 'rgba(255,255,255,0.9)', fontSize: 15, marginBottom: 8, textTransform: 'capitalize' },
+  tarjetaConcejo: { color: 'rgba(255,255,255,0.9)', fontSize: 15, marginBottom: 6 },
+  tarjetaOrquesta: { color: 'rgba(255,255,255,0.85)', fontSize: 14, marginBottom: 6 },
+  tarjetaRating: { color: '#fbbf24', fontSize: 14, fontWeight: '700', marginTop: 4 },
+  tarjetaFooter: { marginTop: 20, paddingTop: 14, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
+  tarjetaFooterTxt: { color: 'rgba(255,255,255,0.6)', fontSize: 11, textAlign: 'center' },
+
+  tarjetaBtns: { marginTop: 20, width: 320, gap: 10 },
+  btnCapturar: { backgroundColor: '#166534', padding: 16, borderRadius: 14, alignItems: 'center' },
+  btnCapturarTxt: { color: 'white', fontWeight: 'bold', fontSize: 16, textAlign: 'center' },
+  btnCapturarSub: { color: 'rgba(255,255,255,0.65)', fontSize: 12, textAlign: 'center', marginTop: 2 },
+  btnCerrarTarjeta: { backgroundColor: 'rgba(255,255,255,0.1)', padding: 14, borderRadius: 14, alignItems: 'center' },
+  btnCerrarTarjetaTxt: { color: 'rgba(255,255,255,0.7)', fontWeight: '600' },
+
+  btnCompartir: { backgroundColor: '#1d4ed8', padding: 16, borderRadius: 15, alignItems: 'center', marginTop: 20 },
+  btnTextoCompartir: { color: 'white', fontWeight: 'bold', fontSize: 15 },
   btnEditar: { backgroundColor: '#e2e8f0', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 12 },
   btnTextoEditar: { color: '#475569', fontWeight: 'bold' },
   btnRecordatorio: { backgroundColor: '#FCD34D', padding: 15, borderRadius: 15, alignItems: 'center', marginTop: 12 },

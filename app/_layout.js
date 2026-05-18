@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import 'react-native-gesture-handler';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import BiometricLock from '../components/BiometricLock';
+import OfflineBanner from '../components/OfflineBanner';
 import { AuthProvider, useAuth } from '../contexts/AuthContext';
 import { ConfigProvider } from '../contexts/ConfigContext';
 import { notificationService } from '../services/notificationService';
@@ -101,6 +102,7 @@ export default function RootLayout() {
       <AuthProvider>
         <ConfigProvider>
           <AuthGuard>
+            <OfflineBanner />
             <NotificationSetup />
             <Stack>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />

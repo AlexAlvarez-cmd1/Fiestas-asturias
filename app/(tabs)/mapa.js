@@ -10,7 +10,7 @@ import { useConfig } from '../../contexts/ConfigContext';
 import { useAuth } from '../../contexts/AuthContext';
 
 // FIREBASE
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, limit, orderBy, query, where } from 'firebase/firestore';
 import { db } from '../../firebaseConfig';
 import { favoritesService } from '../../services/favoritesService';
 import { userService } from '../../services/userService';
@@ -98,7 +98,14 @@ export default function PantallaMapa() {
 
         let fiestasDescargadas = [];
         try {
-          const querySnapshot = await getDocs(collection(db, "fiestas"));
+          const hoyStr = new Date().toISOString().split('T')[0];
+          const q = query(
+            collection(db, 'fiestas'),
+            where('fecha', '>=', hoyStr),
+            orderBy('fecha'),
+            limit(150)
+          );
+          const querySnapshot = await getDocs(q);
           querySnapshot.forEach((doc) => {
             fiestasDescargadas.push({ id: doc.id, ...doc.data() });
           });
@@ -284,13 +291,16 @@ export default function PantallaMapa() {
             coordinate={{ latitude: fiesta.ubicacion.latitude, longitude: fiesta.ubicacion.longitude }}
             onPress={() => {
               router.push({
-                  pathname: '/detalle',
-                  params: {
-                    id: fiesta.id, nombre: fiesta.nombre, concejo: fiesta.concejo,
-                    fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
-                    latitud: fiesta.ubicacion.latitude, longitud: fiesta.ubicacion.longitude,
-                    esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity
-                  }
+                pathname: '/detalle',
+                params: {
+                  id: fiesta.id, nombre: fiesta.nombre, concejo: fiesta.concejo,
+                  fecha: fiesta.fecha, orquesta: fiesta.orquesta, imagen: fiesta.imagen,
+                  latitud: fiesta.ubicacion.latitude, longitud: fiesta.ubicacion.longitude,
+                  esVersity: fiesta.esVersity, linkVersity: fiesta.linkVersity,
+                  descripcion: fiesta.descripcion || '',
+                  categoria: fiesta.categoria || '',
+                  linkEntradas: fiesta.linkEntradas || '',
+                },
               });
             }}
           >
